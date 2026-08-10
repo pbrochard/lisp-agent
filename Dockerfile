@@ -51,10 +51,12 @@ RUN curl -sO https://beta.quicklisp.org/quicklisp.lisp \
 RUN sbcl --non-interactive --eval '(ql:quickload (list :dexador :shasht) :silent t)'
 
 COPY agent.lisp .
+COPY agent-run.sh .
 
 # Keep memory.json inside a mountable directory so it survives the container.
 ENV AGENT_MEMORY=/agent/data/memory.json
 RUN mkdir -p /agent/data
 
 # Load the agent and drop you at a live REPL. This is the "login".
-ENTRYPOINT ["sbcl", "--load", "agent.lisp"]
+#ENTRYPOINT ["sbcl", "--load", "agent.lisp"]
+ENTRYPOINT ["/agent/agent-run.sh"]
