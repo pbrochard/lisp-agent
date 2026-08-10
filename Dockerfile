@@ -25,6 +25,20 @@ RUN corepack enable
 COPY data/debs/* /debs/
 RUN dpkg -i /debs/*.deb
 
+# Accept build arguments
+ARG UID=1000
+ARG GID=1000
+
+# Create group and user
+RUN groupadd -g $GID agentuser && \
+    useradd -m -u $UID -g $GID agentuser
+
+WORKDIR /agent
+RUN chown -R agentuser:agentuser /agent
+
+# Switch to non-root user
+USER agentuser
+
 # Quicklisp, installed non-interactively and wired into the SBCL init file.
 RUN curl -sO https://beta.quicklisp.org/quicklisp.lisp \
  && sbcl --non-interactive \
@@ -36,7 +50,6 @@ RUN curl -sO https://beta.quicklisp.org/quicklisp.lisp \
 # Bake the dependencies into the image so startup is instant.
 RUN sbcl --non-interactive --eval '(ql:quickload (list :dexador :shasht) :silent t)'
 
-WORKDIR /agent
 COPY agent.lisp .
 
 # Keep memory.json inside a mountable directory so it survives the container.
