@@ -22,8 +22,9 @@
 (in-package :agent)
 
 (defparameter *endpoint* "https://openrouter.ai/api/v1/chat/completions")
-(defparameter *model* "anthropic/claude-sonnet-4.5")
-(defparameter *api-key* (uiop:getenv "OPENROUTER_API_KEY"))
+;;(defparameter *model* "anthropic/claude-sonnet-4.5")
+(defparameter *model* "google/gemma-4-31B-it")
+(defparameter *api-key* (uiop:getenv "API_KEY"))
 
 ;;; --- tiny JSON helpers -------------------------------------------------
 ;;; shasht reads JSON objects as hash tables; OBJ builds them going out.
