@@ -4,7 +4,7 @@
 ;;;; the model writes Lisp, the loop runs it, the result flows back.
 ;;;;
 ;;;; Usage:
-;;;;   export OPENROUTER_API_KEY=sk-or-...
+;;;;   ollama pull qwen3:8b     ; and make sure the ollama server is running
 ;;;;   sbcl --load agent.lisp --eval '(agent:run "What is the 30th Fibonacci number? Compute it.")'
 ;;;;
 ;;;; Memory: the full conversation persists to memory.json between runs.
@@ -21,10 +21,10 @@
 
 (in-package :agent)
 
-(defparameter *endpoint* "https://openrouter.ai/api/v1/chat/completions")
-;;(defparameter *model* "anthropic/claude-sonnet-4.5")
-(defparameter *model* "google/gemma-4-31B-it")
-(defparameter *api-key* (uiop:getenv "API_KEY"))
+(defparameter *endpoint* "http://localhost:11434/api/chat")
+(defparameter *model* "qwen3:8b")
+(defparameter *system-prompt*
+  "You are a helpful agent with a live Common Lisp REPL. Prefer computing answers with lisp-eval over guessing. Your conversation history persists across sessions.")
 
 ;;; --- tiny JSON helpers -------------------------------------------------
 ;;; shasht reads JSON objects as hash tables; OBJ builds them going out.
@@ -64,15 +64,16 @@
     (error (e) (format nil "ERROR: ~a" e))))
 
 (defun execute (tool-call)
-  "Turn one tool-call from the model into a tool-result message."
-  (let* ((name (ref tool-call "function" "name"))
-         (args (shasht:read-json (ref tool-call "function" "arguments")))
+  "Turn one tool call from the model into a tool-result message."
+  (let* ((fn (gethash "function" tool-call))
+         (name (gethash "name" fn))
+         (args (gethash "arguments" fn))
          (result (if (string= name "lisp-eval")
                      (lisp-eval (gethash "form" args))
                      (format nil "ERROR: unknown tool ~a" name))))
     (format t "~&  ⤷ ~a => ~a~%" (gethash "form" args) result)
     (obj "role" "tool"
-         "tool_call_id" (gethash "id" tool-call)
+         "tool_name" name
          "content" result)))
 
 ;;; --- talking to the model ----------------------------------------------
@@ -80,11 +81,14 @@
 (defun call-model (messages)
   (shasht:read-json
    (dex:post *endpoint*
-             :headers `(("Authorization" . ,(format nil "Bearer ~a" *api-key*))
-                        ("Content-Type" . "application/json"))
+             :headers '(("content-type" . "application/json"))
              :content (shasht:write-json
                        (obj "model" *model*
-                            "messages" (coerce messages 'vector)
+                            "stream" :false
+                            "messages"
+                            (coerce (cons (obj "role" "system" "content" *system-prompt*)
+                                          messages)
+                                    'vector)
                             "tools" *tools*)
                        nil))))
 
@@ -94,9 +98,8 @@
 ;;; for tools, we run them, and recur with the enriched history.
 
 (defun agent-loop (messages)
-  "Returns the complete message history, final answer included.
-The answer is just (gethash \"content\" (car (last messages)))."
-  (let* ((message (ref (call-model messages) "choices" 0 "message"))
+  "Returns the complete message history, final answer included."
+  (let* ((message (gethash "message" (call-model messages)))
          (tool-calls (gethash "tool_calls" message)))
     (if (and tool-calls (plusp (length tool-calls)))
         (agent-loop (append messages
@@ -111,10 +114,6 @@ The answer is just (gethash \"content\" (car (last messages)))."
 (defparameter *memory-file*
   (pathname (or (uiop:getenv "AGENT_MEMORY") "memory.json")))
 
-(defparameter *system-message*
-  (obj "role" "system"
-       "content" "You are a helpful agent with a live Common Lisp REPL. Prefer computing answers with lisp-eval over guessing. Your conversation history persists across sessions."))
-
 (defun remember (messages)
   (with-open-file (out *memory-file* :direction :output :if-exists :supersede)
     (shasht:write-json (coerce messages 'vector) out))
@@ -123,7 +122,7 @@ The answer is just (gethash \"content\" (car (last messages)))."
 (defun recall ()
   (if (probe-file *memory-file*)
       (coerce (with-open-file (in *memory-file*) (shasht:read-json in)) 'list)
-      (list *system-message*)))
+      '()))
 
 (defun forget ()
   (when (probe-file *memory-file*) (delete-file *memory-file*))
@@ -131,9 +130,13 @@ The answer is just (gethash \"content\" (car (last messages)))."
 
 ;;; --- entry point ------------------------------------------------------------
 
+(defun final-text (message)
+  "The assistant's text answer."
+  (gethash "content" message))
+
 (defun run (prompt)
   (let ((history (remember
                   (agent-loop
                    (append (recall)
                            (list (obj "role" "user" "content" prompt)))))))
-    (format t "~&~a~%" (gethash "content" (car (last history))))))
+    (format t "~&~a~%" (final-text (car (last history))))))
