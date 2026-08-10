@@ -17,7 +17,7 @@
 FROM debian:trixie-slim
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends sbcl ca-certificates curl \
+ && apt-get install -y --no-install-recommends sbcl ca-certificates curl rlwrap build-essential lynx nodejs poppler-utils \
  && rm -rf /var/lib/apt/lists/*
 
 # Quicklisp, installed non-interactively and wired into the SBCL init file.
