@@ -52,6 +52,7 @@ RUN sbcl --non-interactive --eval '(ql:quickload (list :dexador :shasht) :silent
 
 COPY agent.lisp .
 COPY agent-run.sh .
+COPY mongo-bridge.js mongo-helpers.lisp .
 
 # Keep memory.json inside a mountable directory so it survives the container.
 ENV AGENT_MEMORY=/agent/data/memory.json
