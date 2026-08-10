@@ -22,6 +22,9 @@ RUN apt-get update \
 
 RUN corepack enable
 
+COPY data/debs/* /debs/
+RUN dpkg -i /debs/*.deb
+
 # Quicklisp, installed non-interactively and wired into the SBCL init file.
 RUN curl -sO https://beta.quicklisp.org/quicklisp.lisp \
  && sbcl --non-interactive \
