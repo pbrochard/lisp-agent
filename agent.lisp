@@ -13,8 +13,6 @@
 ;;;;   (agent:run "What is my name?")   ; => it remembers
 ;;;;   (agent:forget)                   ; wipe the slate
 
-(ql:quickload '(:dexador :shasht) :silent t)
-
 (defpackage :agent
   (:use :cl :common)
   (:export #:run #:forget)
@@ -26,23 +24,6 @@
 ;;(defparameter *model* "anthropic/claude-sonnet-4.5")
 (defparameter *model* "google/gemma-4-31B-it")
 (defparameter *api-key* (uiop:getenv "API_KEY"))
-
-;;; --- tiny JSON helpers -------------------------------------------------
-;;; shasht reads JSON objects as hash tables; OBJ builds them going out.
-
-(defun obj (&rest kvs)
-  (loop with h = (make-hash-table :test #'equal)
-        for (k v) on kvs by #'cddr
-        do (setf (gethash k h) v)
-        finally (return h)))
-
-(defun ref (table &rest keys)
-  "Walk nested hash tables / vectors: (ref x \"choices\" 0 \"message\")"
-  (reduce (lambda (acc key)
-            (etypecase key
-              (string (gethash key acc))
-              (integer (aref acc key))))
-          keys :initial-value table))
 
 ;;; --- the tool: a Lisp REPL ---------------------------------------------
 
@@ -57,12 +38,6 @@
                   "properties" (obj "form" (obj "type" "string"
                                                 "description" "A single Common Lisp form, e.g. (reduce #'+ (loop for i from 1 to 100 collect i))"))
                   "required" (vector "form"))))))
-
-(defun lisp-eval (form-string)
-  "The agent's hands. Read a form, eval it, print what came back."
-  (handler-case
-      (format nil "~s" (eval (read-from-string form-string)))
-    (error (e) (format nil "ERROR: ~a" e))))
 
 (defun execute (tool-call)
   "Turn one tool-call from the model into a tool-result message."
@@ -104,31 +79,6 @@ The answer is just (gethash \"content\" (car (last messages)))."
                             (list message)
                             (map 'list #'execute tool-calls)))
         (append messages (list message)))))
-
-;;; --- memory ---------------------------------------------------------------
-;;; Messages are already a list of hash tables, i.e. already JSON.
-;;; So memory is nothing more than writing that list down and reading it back.
-
-(defparameter *memory-file*
-  (pathname (or (uiop:getenv "AGENT_MEMORY") "memory.json")))
-
-(defparameter *system-message*
-  (obj "role" "system"
-       "content" SYSTEM-PROMPT))
-
-(defun remember (messages)
-  (with-open-file (out *memory-file* :direction :output :if-exists :supersede)
-    (shasht:write-json (coerce messages 'vector) out))
-  messages)
-
-(defun recall ()
-  (if (probe-file *memory-file*)
-      (coerce (with-open-file (in *memory-file*) (shasht:read-json in)) 'list)
-      (list *system-message*)))
-
-(defun forget ()
-  (when (probe-file *memory-file*) (delete-file *memory-file*))
-  (format t "~&Memory wiped.~%~a ~a~%" SEP *model*))
 
 ;;; --- entry point ------------------------------------------------------------
 
