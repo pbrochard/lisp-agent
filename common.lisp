@@ -1,6 +1,6 @@
 (defpackage :common
   (:use :cl)
-  (:export #:SYSTEM-PROMPT #:SEP #:OBJ #:REF #:LISP-EVAL #:RECALL #:REMEMBER #:FORGET)
+  (:export #:SYSTEM-PROMPT #:SEP #:OBJ #:REF #:LISP-EVAL #:RECALL #:REMEMBER #:FORGET #:BASH)
   (:nicknames :c :co))
 
 (in-package :common)
@@ -57,3 +57,7 @@
 (defun forget ()
   (when (probe-file *memory-file*) (delete-file *memory-file*))
   (format t "~&Memory wiped.~%~a~%" SEP))
+
+;;; Shell helper
+(defun bash ()
+  (sb-ext:run-program "/bin/bash" nil :output t :input t :search t))
