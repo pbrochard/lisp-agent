@@ -10,4 +10,5 @@ API_KEY=$(gpg -d ~/.authinfo.gpg 2> /dev/null | awk '/^machine openrouter.ai/ {p
 docker run -it --rm \
 	   -e API_KEY=$API_KEY \
 	   -v "$(pwd)/data:/agent/data" \
+	   -v "$(pwd)/skills:/agent/skills" \
 	   lisp-agent
