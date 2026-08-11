@@ -4,4 +4,4 @@ node /agent/mongo-bridge.js &
 
 # Wrap SBCL in rlwrap for better command line editing and history support
 # https://gist.github.com/vindarel/2309154f4e751be389fa99239764c363
-rlwrap -r -i -b '()' sbcl --load agent.lisp
+rlwrap -r -i -b '()' sbcl --load load.lisp

@@ -16,7 +16,7 @@
 (ql:quickload '(:dexador :shasht) :silent t)
 
 (defpackage :agent
-  (:use :cl)
+  (:use :cl :common)
   (:export #:run #:forget))
 
 (in-package :agent)
@@ -127,7 +127,7 @@ The answer is just (gethash \"content\" (car (last messages)))."
 
 (defun forget ()
   (when (probe-file *memory-file*) (delete-file *memory-file*))
-  (format t "~&Memory wiped.~%"))
+  (format t "~&Memory wiped.~%~a ~a~%" SEP *model*))
 
 ;;; --- entry point ------------------------------------------------------------
 
@@ -136,4 +136,4 @@ The answer is just (gethash \"content\" (car (last messages)))."
                   (agent-loop
                    (append (recall)
                            (list (obj "role" "user" "content" prompt)))))))
-    (format t "~&~a~%" (gethash "content" (car (last history))))))
+    (format t "~&-----~&~a~%~a ~a~%" (gethash "content" (car (last history))) SEP *model*)))
