@@ -113,7 +113,7 @@ The answer is just (gethash \"content\" (car (last messages)))."
 
 (defparameter *system-message*
   (obj "role" "system"
-       "content" "You are a helpful agent with a live Common Lisp REPL. Prefer computing answers with lisp-eval over guessing. Your conversation history persists across sessions."))
+       "content" SYSTEM-PROMPT))
 
 (defun remember (messages)
   (with-open-file (out *memory-file* :direction :output :if-exists :supersede)
