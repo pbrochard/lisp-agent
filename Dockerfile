@@ -53,7 +53,7 @@ RUN sbcl --non-interactive --eval '(ql:quickload (list :dexador :shasht) :silent
 COPY load.lisp common.lisp agent.lisp .
 COPY agent-run.sh .
 
-COPY skills/ .
+COPY skills/ ./skills/
 
 # Keep memory.json inside a mountable directory so it survives the container.
 ENV AGENT_MEMORY=/agent/data/memory.json
