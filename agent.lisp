@@ -17,7 +17,8 @@
 
 (defpackage :agent
   (:use :cl :common)
-  (:export #:run #:forget))
+  (:export #:run #:forget)
+  (:nicknames :a :ag))
 
 (in-package :agent)
 
