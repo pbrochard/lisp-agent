@@ -1,6 +1,6 @@
 (defpackage :common
   (:use :cl)
-  (:export #:SYSTEM-PROMPT #:*CURRENT-RUN-FN* #:*MEMORY-FILE* #:SEP #:OBJ #:REF #:LISP-EVAL #:RECALL #:REMEMBER #:FORGET #:BASH)
+  (:export #:SYSTEM-PROMPT #:*CURRENT-RUN-FN* #:*MEMORY-FILE* #:*SYSTEM-MESSAGE* #:SEP #:OBJ #:LISP-EVAL #:RECALL #:REMEMBER #:FORGET #:BASH)
   (:nicknames :c :co))
 
 (in-package :common)
@@ -20,14 +20,6 @@
         do (setf (gethash k h) v)
         finally (return h)))
 
-(defun ref (table &rest keys)
-  "Walk nested hash tables / vectors: (ref x \"choices\" 0 \"message\")"
-  (reduce (lambda (acc key)
-            (etypecase key
-              (string (gethash key acc))
-              (integer (aref acc key))))
-          keys :initial-value table))
-
 ;;; --- the tool: a Lisp REPL ---------------------------------------------
 (defun lisp-eval (form-string)
   "The agent's hands. Read a form, eval it, print what came back."
@@ -42,9 +34,7 @@
 (defparameter *memory-file*
   (pathname (or (uiop:getenv "AGENT_MEMORY") "/agent/data/memory.json")))
 
-(defparameter *system-message*
-  (obj "role" "system"
-       "content" SYSTEM-PROMPT))
+(defparameter *system-message* '())
 
 (defun remember (messages)
   (with-open-file (out *memory-file* :direction :output :if-exists :supersede)
@@ -54,7 +44,7 @@
 (defun recall ()
   (if (probe-file *memory-file*)
       (coerce (with-open-file (in *memory-file*) (shasht:read-json in)) 'list)
-      (list *system-message*)))
+      *system-message*))
 
 (defun forget ()
   (when (probe-file *memory-file*) (delete-file *memory-file*))
