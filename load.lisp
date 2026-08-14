@@ -2,5 +2,3 @@
 
 (load "common.lisp")
 (load "agent.lisp")
-
-(use-package :common)
