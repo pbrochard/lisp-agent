@@ -15,7 +15,7 @@
 
 (defpackage :agent
   (:use :cl :common)
-  (:export #:run)
+  (:export #:run #:use)
   (:nicknames :a :ag))
 
 (in-package :agent)
@@ -23,7 +23,15 @@
 (defparameter *endpoint* "https://openrouter.ai/api/v1/chat/completions")
 ;;(defparameter *model* "anthropic/claude-sonnet-4.5")
 (defparameter *model* "google/gemma-4-31B-it")
-(defparameter *api-key* (uiop:getenv "API_KEY"))
+(defparameter *api-key* (uiop:getenv "API_KEY_OPENROUTER"))
+
+(defun ref (table &rest keys)
+  "Walk nested hash tables / vectors: (ref x \"choices\" 0 \"message\")"
+  (reduce (lambda (acc key)
+            (etypecase key
+              (string (gethash key acc))
+              (integer (aref acc key))))
+          keys :initial-value table))
 
 ;;; --- the tool: a Lisp REPL ---------------------------------------------
 
@@ -81,12 +89,19 @@ The answer is just (gethash \"content\" (car (last messages)))."
         (append messages (list message)))))
 
 ;;; --- entry point ------------------------------------------------------------
+(defun use () nil)
 
 (defun run (prompt)
-  (setf *current-run-fn* #'run
-		*memory-file* (pathname "/agent/data/memory-agent.json"))
+  (use)
   (let ((history (remember
                   (agent-loop
                    (append (recall)
                            (list (obj "role" "user" "content" prompt)))))))
     (format t "~&______~&~%~a~%~a ~a~%" (gethash "content" (car (last history))) SEP *model*)))
+
+(defun use ()
+  (setf *current-run-fn* #'run
+		*memory-file* (pathname "/agent/data/memory-agent.json")
+		*system-message* (list (obj "role" "system"
+									"content" SYSTEM-PROMPT)))
+  *model*)
