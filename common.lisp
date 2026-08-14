@@ -67,3 +67,9 @@
 ;;; Generic run
 (defun run (prompt)
   (funcall *current-run-fn* prompt))
+
+(defun memo ()
+  (run "Write down in the ./data/knowledge.md file what you have learned so far to share it with other IA"))
+
+(defun learn ()
+  (run "Learn what you should know so far from the file ./data/knowledge.md"))
