@@ -15,7 +15,7 @@
 
 (defpackage :agent-gemini
   (:use :cl :common)
-  (:export #:run #:use)
+  (:export #:run #:use #:list-models *model*)
   (:nicknames :g :gm :gem :gemini))
 
 (in-package :agent-gemini)
@@ -117,3 +117,13 @@
 		*memory-file* (pathname "/agent/data/memory-gemini.json")
 		*system-message* '())
   *model*)
+
+(defun list-models ()
+  (let ((models (gethash "models" (shasht:read-json
+								   (dex:get (format nil "https://generativelanguage.googleapis.com/v1beta/models?key=~a" *api-key*)
+											:headers '(("content-type" . "application/json")))))))
+	(loop for m across models
+		  for name = (gethash "name" m)
+		  do (format t "~&~a~%" name))))
+
+
