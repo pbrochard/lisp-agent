@@ -15,7 +15,7 @@
 
 (defpackage :agent
   (:use :cl :common)
-  (:export #:run #:forget)
+  (:export #:run)
   (:nicknames :a :ag))
 
 (in-package :agent)
@@ -83,8 +83,10 @@ The answer is just (gethash \"content\" (car (last messages)))."
 ;;; --- entry point ------------------------------------------------------------
 
 (defun run (prompt)
+  (setf *current-run-fn* #'run
+		*memory-file* (pathname "/agent/data/memory-agent.json"))
   (let ((history (remember
                   (agent-loop
                    (append (recall)
                            (list (obj "role" "user" "content" prompt)))))))
-    (format t "~&-----~&~a~%~a ~a~%" (gethash "content" (car (last history))) SEP *model*)))
+    (format t "~&______~&~%~a~%~a ~a~%" (gethash "content" (car (last history))) SEP *model*)))

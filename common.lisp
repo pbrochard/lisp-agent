@@ -1,11 +1,13 @@
 (defpackage :common
   (:use :cl)
-  (:export #:SYSTEM-PROMPT #:SEP #:OBJ #:REF #:LISP-EVAL #:RECALL #:REMEMBER #:FORGET #:BASH)
+  (:export #:SYSTEM-PROMPT #:*CURRENT-RUN-FN* #:*MEMORY-FILE* #:SEP #:OBJ #:REF #:LISP-EVAL #:RECALL #:REMEMBER #:FORGET #:BASH)
   (:nicknames :c :co))
 
 (in-package :common)
 
 (defconstant SYSTEM-PROMPT "You are a helpful agent with a live Common Lisp REPL. Prefer computing answers with lisp-eval over guessing. Your conversation history persists across sessions. You live in a Docker container without sudo or root access. Ask if you need a software to perform a task.")
+
+(defparameter *current-run-fn* nil)
 
 (defconstant SEP "___________________________________________________________________________")
 
@@ -38,7 +40,7 @@
 ;;; So memory is nothing more than writing that list down and reading it back.
 
 (defparameter *memory-file*
-  (pathname (or (uiop:getenv "AGENT_MEMORY") "memory.json")))
+  (pathname (or (uiop:getenv "AGENT_MEMORY") "/agent/data/memory.json")))
 
 (defparameter *system-message*
   (obj "role" "system"
@@ -61,3 +63,7 @@
 ;;; Shell helper
 (defun bash ()
   (sb-ext:run-program "/bin/bash" nil :output t :input t :search t))
+
+;;; Generic run
+(defun run (prompt)
+  (funcall *current-run-fn* prompt))
