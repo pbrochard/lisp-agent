@@ -1,6 +1,6 @@
 (defpackage :common
   (:use :cl)
-  (:export #:SYSTEM-PROMPT #:*CURRENT-RUN-FN* #:*MEMORY-FILE* #:*SYSTEM-MESSAGE* #:SEP #:OBJ #:LISP-EVAL #:RECALL #:REMEMBER #:FORGET #:BASH)
+  (:export #:SYSTEM-PROMPT #:*CURRENT-RUN-FN* #:*MEMORY-FILE* #:*SYSTEM-MESSAGE* #:SEP #:OBJ #:LISP-EVAL #:RECALL #:REMEMBER #:FORGET #:BASH #:SET-STATUS #:STATUS-THINKING #:STATUS-OK)
   (:nicknames :c :co))
 
 (in-package :common)
@@ -10,6 +10,8 @@
 (defparameter *current-run-fn* nil)
 
 (defconstant SEP "___________________________________________________________________________")
+(defconstant STATUS-THINKING "?")
+(defconstant STATUS-OK "!")
 
 ;;; --- tiny JSON helpers -------------------------------------------------
 ;;; shasht reads JSON objects as hash tables; OBJ builds them going out.
@@ -63,3 +65,8 @@
 
 (defun learn ()
   (run "Learn what you should know so far from the file ./data/knowledge.md"))
+
+;; Status functions
+(defun set-status (status)
+  (with-open-file (out "./data/status" :direction :output :if-exists :supersede)
+	(format out "AI~a" status)))

@@ -93,11 +93,13 @@ The answer is just (gethash \"content\" (car (last messages)))."
 
 (defun run (prompt)
   (use)
+  (set-status STATUS-THINKING)
   (let ((history (remember
                   (agent-loop
                    (append (recall)
                            (list (obj "role" "user" "content" prompt)))))))
-    (format t "~&______~&~%~a~%~a ~a~%" (gethash "content" (car (last history))) SEP *model*)))
+    (format t "~&______~&~%~a~%~a ~a~%" (gethash "content" (car (last history))) SEP *model*)
+	(set-status STATUS-OK)))
 
 (defun use ()
   (setf *current-run-fn* #'run
