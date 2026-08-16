@@ -15,7 +15,7 @@
 
 (defpackage :agent-gemini
   (:use :cl :common)
-  (:export #:run #:use #:list-models *model*)
+  (:export #:run #:use #:forget #:list-models *model*)
   (:nicknames :g :gm :gem :gemini))
 
 (in-package :agent-gemini)
@@ -24,6 +24,8 @@
 (defparameter *model* "gemini-3.5-flash")
 ;;(defparameter *model* "gemini-3.1-pro-preview")
 (defparameter *api-key* (uiop:getenv "API_KEY_GEMINI"))
+
+(defconstant MEMORY-FILE "/agent/data/memory-gemini.json")
 
 (defun ref (table &rest keys)
   "Walk nested hash tables / vectors: (ref x \"candidates\" 0 \"content\")"
@@ -116,9 +118,13 @@
 
 (defun use ()
   (setf *current-run-fn* #'run
-		*memory-file* (pathname "/agent/data/memory-gemini.json")
+		*memory-file* (pathname MEMORY-FILE)
 		*system-message* '())
   *model*)
+
+(defun forget ()
+  (let ((*memory-file* (pathname MEMORY-FILE)))
+	(forget-mem)))
 
 (defun list-models ()
   (let ((models (gethash "models" (shasht:read-json
@@ -127,5 +133,3 @@
 	(loop for m across models
 		  for name = (gethash "name" m)
 		  do (format t "~&~a~%" name))))
-
-
