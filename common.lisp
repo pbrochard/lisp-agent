@@ -52,6 +52,21 @@
   (when (probe-file *memory-file*) (delete-file *memory-file*))
   (format t "~&Memory wiped: ~a.~%~a~%" *memory-file* SEP))
 
+(defun forget-all ()
+  "Finds all /agent/data/memory-*.json files and deletes them from the filesystem."
+  (let ((directory "/agent/data/")
+        (pattern "memory-")
+        (extension ".json"))
+    ;; Find all files matching the pattern
+    (let ((files (directory (merge-pathnames (format nil "~a~a*~a" directory pattern extension) directory))))
+      (if (null files)
+          (format t "No matching memory files found.~%")
+          (progn
+            (dolist (file files)
+              (delete-file file)
+              (format t "Deleted: ~a~%" file))
+			(format t "Successfully deleted ~a file(s).~%" (length files)))))))
+
 ;;; Shell helper
 (defun bash ()
   (sb-ext:run-program "/bin/bash" nil :output t :input t :search t))
