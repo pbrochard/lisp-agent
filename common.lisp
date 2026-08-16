@@ -61,10 +61,10 @@
   (funcall *current-run-fn* prompt))
 
 (defun memo ()
-  (run "Write down in the ./data/knowledge.md file what you have learned so far to share it with other IA"))
+  (run "Write down in the ./data/knowledge.md file what you have learned so far to share it with other IA. Acknowledge and output nothing else."))
 
 (defun learn ()
-  (run "Learn what you should know so far from the file ./data/knowledge.md"))
+  (run "Learn what you should know so far from the file ./data/knowledge.md. Acknowledge and output nothing else."))
 
 ;; Status functions
 (defun set-status (status)
