@@ -15,7 +15,7 @@
 
 (defpackage :agent-gemini
   (:use :cl :utils :common)
-  (:export #:run #:use #:forget #:list-models :*model* :*models* #:lm #:llm #:set-model)
+  (:export #:run #:use #:forget #:list-models :*models* #:lm #:llm #:set-model)
   (:nicknames :g :gm :gem :gemini))
 
 (in-package :agent-gemini)
