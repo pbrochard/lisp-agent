@@ -6,4 +6,4 @@
 (load "agent-gemini.lisp")
 (load "agent-claude.lisp")
 
-(setf common:*current-run-fn* #'agent:run)
+(agent:use)

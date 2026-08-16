@@ -9,7 +9,7 @@ function finish {
 trap 'finish $?' EXIT
 
 
-echo "AI" > $STATUS_FILE
+echo "[AI]" > $STATUS_FILE
 
 # Wrap SBCL in rlwrap for better command line editing and history support
 # https://gist.github.com/vindarel/2309154f4e751be389fa99239764c363

@@ -1,6 +1,6 @@
 (defpackage :common
   (:use :cl :utils)
-  (:export #:SYSTEM-PROMPT #:*CURRENT-RUN-FN* #:*MEMORY-FILE* #:*SYSTEM-MESSAGE* #:SEP #:OBJ #:LISP-EVAL #:RECALL #:REMEMBER #:FORGET-MEM #:BASH #:SET-STATUS #:STATUS-THINKING #:STATUS-OK)
+  (:export #:SYSTEM-PROMPT #:*CURRENT-RUN-FN* #:*current-model* #:*MEMORY-FILE* #:*SYSTEM-MESSAGE* #:SEP #:OBJ #:LISP-EVAL #:RECALL #:REMEMBER #:FORGET-MEM #:BASH #:SET-STATUS #:STATUS-THINKING #:STATUS-OK)
   (:nicknames :c :co))
 
 (in-package :common)
@@ -8,10 +8,11 @@
 (defconstant SYSTEM-PROMPT "You are a helpful agent with a live Common Lisp REPL. Prefer computing answers with lisp-eval over guessing. Your conversation history persists across sessions. You live in a Docker container without sudo or root access. Ask if you need a software to perform a task.")
 
 (defparameter *current-run-fn* nil)
+(defparameter *current-model* "")
 
 (defconstant SEP "___________________________________________________________________________")
-(defconstant STATUS-THINKING "?")
-(defconstant STATUS-OK "!")
+(defconstant STATUS-THINKING " thinking...")
+(defconstant STATUS-OK "")
 
 ;;; --- tiny JSON helpers -------------------------------------------------
 ;;; shasht reads JSON objects as hash tables; OBJ builds them going out.
@@ -84,4 +85,4 @@
 ;; Status functions
 (defun set-status (status)
   (with-open-file (out "./data/status" :direction :output :if-exists :supersede)
-	(format out "AI~a" status)))
+	(format out "[AI:~a~a]" *current-model* status)))

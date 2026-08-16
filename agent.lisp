@@ -105,9 +105,11 @@ The answer is just (gethash \"content\" (car (last messages)))."
 
 (defun use ()
   (setf *current-run-fn* #'run
+		*current-model* *model*
 		*memory-file* (pathname MEMORY-FILE)
 		*system-message* (list (obj "role" "system"
 									"content" SYSTEM-PROMPT)))
+  (set-status STATUS-OK)
   *model*)
 
 (defun forget ()
