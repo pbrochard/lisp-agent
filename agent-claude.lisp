@@ -15,7 +15,7 @@
 
 (defpackage :agent-claude
   (:use :cl :common)
-  (:export #:run #:use)
+  (:export #:run #:use #:forget)
   (:nicknames :cd :claude))
 
 (in-package :agent-claude)
@@ -25,6 +25,8 @@
 (defparameter *api-key* (uiop:getenv "API_KEY_CLAUDE"))
 (defparameter *max-tokens* 4096)
 (defparameter *api-version* "2023-06-01")
+
+(defconstant MEMORY-FILE "/agent/data/memory-claude.json")
 
 (defun ref (table &rest keys)
   "Walk nested hash tables / vectors: (ref x \"choices\" 0 \"message\")"
@@ -117,6 +119,10 @@
 
 (defun use ()
   (setf *current-run-fn* #'run
-		*memory-file* (pathname "/agent/data/memory-claude.json")
+		*memory-file* (pathname MEMORY-FILE)
 		*system-message* '())
   *model*)
+
+(defun forget ()
+  (let ((*memory-file* (pathname MEMORY-FILE)))
+	(forget-mem)))

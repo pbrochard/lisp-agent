@@ -15,7 +15,7 @@
 
 (defpackage :agent
   (:use :cl :common)
-  (:export #:run #:use)
+  (:export #:run #:use #:forget)
   (:nicknames :a :ag))
 
 (in-package :agent)
@@ -24,6 +24,8 @@
 ;;(defparameter *model* "anthropic/claude-sonnet-4.5")
 (defparameter *model* "google/gemma-4-31B-it")
 (defparameter *api-key* (uiop:getenv "API_KEY_OPENROUTER"))
+
+(defconstant MEMORY-FILE "/agent/data/memory-agent.json")
 
 (defun ref (table &rest keys)
   "Walk nested hash tables / vectors: (ref x \"choices\" 0 \"message\")"
@@ -103,7 +105,11 @@ The answer is just (gethash \"content\" (car (last messages)))."
 
 (defun use ()
   (setf *current-run-fn* #'run
-		*memory-file* (pathname "/agent/data/memory-agent.json")
+		*memory-file* (pathname MEMORY-FILE)
 		*system-message* (list (obj "role" "system"
 									"content" SYSTEM-PROMPT)))
   *model*)
+
+(defun forget ()
+  (let ((*memory-file* (pathname MEMORY-FILE)))
+	(forget-mem)))

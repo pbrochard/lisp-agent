@@ -1,6 +1,6 @@
 (defpackage :common
   (:use :cl)
-  (:export #:SYSTEM-PROMPT #:*CURRENT-RUN-FN* #:*MEMORY-FILE* #:*SYSTEM-MESSAGE* #:SEP #:OBJ #:LISP-EVAL #:RECALL #:REMEMBER #:FORGET #:BASH #:SET-STATUS #:STATUS-THINKING #:STATUS-OK)
+  (:export #:SYSTEM-PROMPT #:*CURRENT-RUN-FN* #:*MEMORY-FILE* #:*SYSTEM-MESSAGE* #:SEP #:OBJ #:LISP-EVAL #:RECALL #:REMEMBER #:FORGET-MEM #:BASH #:SET-STATUS #:STATUS-THINKING #:STATUS-OK)
   (:nicknames :c :co))
 
 (in-package :common)
@@ -48,9 +48,9 @@
       (coerce (with-open-file (in *memory-file*) (shasht:read-json in)) 'list)
       *system-message*))
 
-(defun forget ()
+(defun forget-mem ()
   (when (probe-file *memory-file*) (delete-file *memory-file*))
-  (format t "~&Memory wiped.~%~a~%" SEP))
+  (format t "~&Memory wiped: ~a.~%~a~%" *memory-file* SEP))
 
 ;;; Shell helper
 (defun bash ()
