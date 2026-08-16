@@ -21,7 +21,7 @@
 (in-package :agent-claude)
 
 (defparameter *endpoint* "https://api.anthropic.com/v1/messages")
-(defparameter *model* "claude-sonnet-4-6")
+(defparameter *model* "claude-sonnet-5")
 (defparameter *api-key* (uiop:getenv "API_KEY_CLAUDE"))
 (defparameter *max-tokens* 4096)
 (defparameter *api-version* "2023-06-01")
