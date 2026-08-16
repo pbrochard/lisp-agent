@@ -1,8 +1,17 @@
 (defpackage :utils
   (:use :cl)
-  (:export #:hash-table-keys #:hash-table-values #:obj-to-string #:replace-all #:remove-prefix))
+  (:export #:obj #:hash-table-keys #:hash-table-values #:obj-to-string #:lisp-eval #:replace-all #:remove-prefix))
 
 (in-package :utils)
+
+;;; --- tiny JSON helpers -------------------------------------------------
+;;; shasht reads JSON objects as hash tables; OBJ builds them going out.
+
+(defun obj (&rest kvs)
+  (loop with h = (make-hash-table :test #'equal)
+        for (k v) on kvs by #'cddr
+        do (setf (gethash k h) v)
+        finally (return h)))
 
 (defun hash-table-keys (hash-table)
   (loop for key being the hash-keys of hash-table collect key))
@@ -19,6 +28,14 @@
 						   v)))
 			 obj)))
 
+;;; --- the tool: a Lisp REPL ---------------------------------------------
+(defun lisp-eval (form-string)
+  "The agent's hands. Read a form, eval it, print what came back."
+  (handler-case
+      (format nil "~s" (eval (read-from-string form-string)))
+    (error (e) (format nil "ERROR: ~a" e))))
+
+;;; --- String helpers ----------------------------------------------------
 (defun replace-all (string part replacement)
   "Replace all occurrences of PART in STRING with REPLACEMENT."
   (with-output-to-string (out)

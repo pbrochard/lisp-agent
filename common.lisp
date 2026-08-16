@@ -1,6 +1,6 @@
 (defpackage :common
   (:use :cl :utils)
-  (:export #:SYSTEM-PROMPT #:*CURRENT-RUN-FN* #:*current-model* #:*MEMORY-FILE* #:*SYSTEM-MESSAGE* #:SEP #:OBJ #:LISP-EVAL #:RECALL #:REMEMBER #:FORGET-MEM #:BASH #:SET-STATUS #:STATUS-THINKING #:STATUS-OK)
+  (:export #:SYSTEM-PROMPT #:*CURRENT-RUN-FN* #:*current-model* #:*MEMORY-FILE* #:*SYSTEM-MESSAGE* #:SEP #:RECALL #:REMEMBER #:FORGET-MEM #:BASH #:SET-STATUS #:STATUS-THINKING #:STATUS-OK)
   (:nicknames :c :co))
 
 (in-package :common)
@@ -13,22 +13,6 @@
 (defconstant SEP "___________________________________________________________________________")
 (defconstant STATUS-THINKING " thinking...")
 (defconstant STATUS-OK "")
-
-;;; --- tiny JSON helpers -------------------------------------------------
-;;; shasht reads JSON objects as hash tables; OBJ builds them going out.
-
-(defun obj (&rest kvs)
-  (loop with h = (make-hash-table :test #'equal)
-        for (k v) on kvs by #'cddr
-        do (setf (gethash k h) v)
-        finally (return h)))
-
-;;; --- the tool: a Lisp REPL ---------------------------------------------
-(defun lisp-eval (form-string)
-  "The agent's hands. Read a form, eval it, print what came back."
-  (handler-case
-      (format nil "~s" (eval (read-from-string form-string)))
-    (error (e) (format nil "ERROR: ~a" e))))
 
 ;;; --- memory ---------------------------------------------------------------
 ;;; Messages are already a list of hash tables, i.e. already JSON.

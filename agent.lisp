@@ -14,7 +14,7 @@
 ;;;;   (agent:forget)                   ; wipe the slate
 
 (defpackage :agent
-  (:use :cl :common)
+  (:use :cl :utils :common)
   (:export #:run #:use #:forget)
   (:nicknames :a :ag))
 
