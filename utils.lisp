@@ -1,6 +1,6 @@
 (defpackage :utils
   (:use :cl)
-  (:export #:hash-table-keys #:hash-table-values #:replace-all #:remove-prefix))
+  (:export #:hash-table-keys #:hash-table-values #:obj-to-string #:replace-all #:remove-prefix))
 
 (in-package :utils)
 
@@ -9,6 +9,15 @@
 
 (defun hash-table-values (hash-table)
   (loop for value being the hash-values of hash-table collect value))
+
+(defun obj-to-string (obj)
+  (with-output-to-string (str)
+	(maphash (lambda (k v)
+			   (format str "~&  ~a: ~a" k
+					   (if (equal (type-of v) 'HASH-TABLE)
+						   (obj-to-string v)
+						   v)))
+			 obj)))
 
 (defun replace-all (string part replacement)
   "Replace all occurrences of PART in STRING with REPLACEMENT."

@@ -14,8 +14,8 @@
 ;;;;   (agent:forget)                   ; wipe the slate
 
 (defpackage :agent-claude
-  (:use :cl :common)
-  (:export #:run #:use #:forget)
+  (:use :cl :utils :common)
+  (:export #:run #:use #:forget #:list-models #:*models* #:lm #:llm #:set-model)
   (:nicknames :cd :claude))
 
 (in-package :agent-claude)
@@ -25,6 +25,8 @@
 (defparameter *api-key* (uiop:getenv "API_KEY_CLAUDE"))
 (defparameter *max-tokens* 4096)
 (defparameter *api-version* "2023-06-01")
+
+(defparameter *models* nil)
 
 (defconstant MEMORY-FILE "/agent/data/memory-claude.json")
 
@@ -128,3 +130,41 @@
 (defun forget ()
   (let ((*memory-file* (pathname MEMORY-FILE)))
 	(forget-mem)))
+
+(defun list-models ()
+  (unless *models*
+	(setf *models* (gethash "data" (shasht:read-json
+									(dex:get (format nil "https://api.anthropic.com/v1/models")
+											 :headers `(("content-type" . "application/json")
+														("anthropic-version" . ,*api-version*)
+														("X-Api-Key" . ,*api-key*))))))))
+
+(defun lm ()
+  (list-models)
+  (loop for p across *models*
+  		for index from 1
+  		do
+  		   (maphash (lambda (k v)
+  					  (when (string-equal k "id")
+  						(format t "~&[~a] ~a~%" index v)))
+  					p)))
+
+(defun llm ()
+  (list-models)
+  (loop for p across *models*
+		for index from 1
+		do
+		   (maphash (lambda (k v)
+					  (format t "~&~a~a: ~a~%"
+							  (if (string-equal k "name") (format nil "[~a] " index) "")
+							  k
+							  (if (equal (type-of v) 'HASH-TABLE)
+								  (format nil "~%~a" (obj-to-string v))
+								  v)))
+					p)
+		   (format t "~&__________~%")))
+
+(defun set-model (num)
+  (list-models)
+  (setf *model* (gethash "id" (aref *models* (- num 1))))
+  (use))
