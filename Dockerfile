@@ -50,7 +50,7 @@ RUN curl -sO https://beta.quicklisp.org/quicklisp.lisp \
 # Bake the dependencies into the image so startup is instant.
 RUN sbcl --non-interactive --eval '(ql:quickload (list :dexador :shasht) :silent t)'
 
-COPY load.lisp common.lisp agent.lisp agent-gemini.lisp agent-claude.lisp .
+COPY load.lisp utils.lisp common.lisp agent.lisp agent-gemini.lisp agent-claude.lisp .
 COPY agent-run.sh .
 
 COPY skills/ ./skills/
