@@ -119,8 +119,10 @@
 
 (defun use ()
   (setf *current-run-fn* #'run
+		*current-model* *model*
 		*memory-file* (pathname MEMORY-FILE)
 		*system-message* '())
+  (set-status STATUS-OK)
   *model*)
 
 (defun forget ()

@@ -120,8 +120,10 @@
 
 (defun use ()
   (setf *current-run-fn* #'run
+		*current-model* *model*
 		*memory-file* (pathname MEMORY-FILE)
 		*system-message* '())
+  (set-status STATUS-OK)
   *model*)
 
 (defun forget ()
@@ -159,4 +161,5 @@
 
 (defun set-model (num)
   (list-models)
-  (setf *model* (remove-prefix (gethash "name" (aref *models* (- num 1))) "models/")))
+  (setf *model* (remove-prefix (gethash "name" (aref *models* (- num 1))) "models/"))
+  (use))
