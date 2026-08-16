@@ -14,8 +14,8 @@
 ;;;;   (agent:forget)                   ; wipe the slate
 
 (defpackage :agent-gemini
-  (:use :cl :common)
-  (:export #:run #:use #:forget #:list-models *model*)
+  (:use :cl :utils :common)
+  (:export #:run #:use #:forget #:list-models :*model* :*models* #:lm #:llm #:set-model)
   (:nicknames :g :gm :gem :gemini))
 
 (in-package :agent-gemini)
@@ -24,6 +24,8 @@
 (defparameter *model* "gemini-3.5-flash")
 ;;(defparameter *model* "gemini-3.1-pro-preview")
 (defparameter *api-key* (uiop:getenv "API_KEY_GEMINI"))
+
+(defparameter *models* nil)
 
 (defconstant MEMORY-FILE "/agent/data/memory-gemini.json")
 
@@ -127,9 +129,34 @@
 	(forget-mem)))
 
 (defun list-models ()
-  (let ((models (gethash "models" (shasht:read-json
-								   (dex:get (format nil "https://generativelanguage.googleapis.com/v1beta/models?key=~a" *api-key*)
-											:headers '(("content-type" . "application/json")))))))
-	(loop for m across models
-		  for name = (gethash "name" m)
-		  do (format t "~&~a~%" name))))
+  (unless *models*
+	(setf *models* (gethash "models" (shasht:read-json
+									  (dex:get (format nil "https://generativelanguage.googleapis.com/v1beta/models?key=~a" *api-key*)
+											   :headers '(("content-type" . "application/json"))))))))
+
+(defun lm ()
+  (list-models)
+  (loop for p across *models*
+		for index from 1
+		do
+		   (maphash (lambda (k v)
+					  (when (string-equal k "name")
+						(format t "~&[~a] ~a~%" index (remove-prefix v "models/"))))
+					p)))
+
+(defun llm ()
+  (list-models)
+  (loop for p across *models*
+		for index from 1
+		do
+		   (maphash (lambda (k v)
+					  (format t "~&~a~a: ~a~%" (if (string-equal k "name")
+												   (format nil "[~a] " index)
+												   "")
+							  k v))
+					p)
+		   (format t "~&__________~%")))
+
+(defun set-model (num)
+  (list-models)
+  (setf *model* (remove-prefix (gethash "name" (aref *models* (- num 1))) "models/")))

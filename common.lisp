@@ -1,5 +1,5 @@
 (defpackage :common
-  (:use :cl)
+  (:use :cl :utils)
   (:export #:SYSTEM-PROMPT #:*CURRENT-RUN-FN* #:*MEMORY-FILE* #:*SYSTEM-MESSAGE* #:SEP #:OBJ #:LISP-EVAL #:RECALL #:REMEMBER #:FORGET-MEM #:BASH #:SET-STATUS #:STATUS-THINKING #:STATUS-OK)
   (:nicknames :c :co))
 
