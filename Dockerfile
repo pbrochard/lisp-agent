@@ -17,7 +17,7 @@
 FROM debian:trixie-slim
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends sbcl ca-certificates curl rlwrap build-essential lynx nodejs poppler-utils \
+ && apt-get install -y --no-install-recommends sbcl ca-certificates curl rlwrap build-essential git lynx nodejs poppler-utils \
  && rm -rf /var/lib/apt/lists/*
 
 RUN corepack enable
