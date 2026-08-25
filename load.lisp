@@ -5,5 +5,6 @@
 (load "agent.lisp")
 (load "agent-gemini.lisp")
 (load "agent-claude.lisp")
+(load "agent-ollama.lisp")
 
 (agent:use)
