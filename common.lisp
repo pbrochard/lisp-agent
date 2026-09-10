@@ -1,5 +1,5 @@
 (defpackage :common
-  (:use :cl :utils)
+  (:use :cl :utils :cl-ansi-text)
   (:export #:SYSTEM-PROMPT #:*CURRENT-RUN-FN* #:*current-model* #:*MEMORY-FILE* #:*SYSTEM-MESSAGE* #:SEP #:RECALL #:REMEMBER #:FORGET-MEM #:BASH #:SET-STATUS #:STATUS-THINKING #:STATUS-OK)
   (:nicknames :c :co))
 
@@ -10,7 +10,7 @@
 (defparameter *current-run-fn* nil)
 (defparameter *current-model* "")
 
-(defconstant SEP "___________________________________________________________________________")
+(defconstant SEP (green  "___________________________________________________________________________"))
 (defconstant STATUS-THINKING " thinking...")
 (defconstant STATUS-OK "")
 
