@@ -39,16 +39,9 @@ RUN chown -R agentuser:agentuser /agent
 # Switch to non-root user
 USER agentuser
 
-# Quicklisp, installed non-interactively and wired into the SBCL init file.
-RUN curl -sO https://beta.quicklisp.org/quicklisp.lisp \
- && sbcl --non-interactive \
-         --load quicklisp.lisp \
-         --eval '(quicklisp-quickstart:install)' \
-         --eval '(ql-util:without-prompting (ql:add-to-init-file))' \
- && rm quicklisp.lisp
-
-# Bake the dependencies into the image so startup is instant.
-RUN sbcl --non-interactive --eval '(ql:quickload (list :dexador :shasht) :silent t)'
+## Quicklisp, installed non-interactively and wired into the SBCL init file.
+COPY prepare-sbcl.sh .
+RUN ./prepare-sbcl.sh
 
 COPY load.lisp utils.lisp common.lisp agent.lisp agent-gemini.lisp agent-claude.lisp agent-ollama.lisp .
 COPY agent-run.sh .
