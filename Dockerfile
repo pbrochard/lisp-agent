@@ -22,6 +22,9 @@ RUN apt-get update \
 
 RUN corepack enable
 
+# Claude Code CLI, for agent-claudecode.lisp (subscription auth, no API key).
+RUN corepack npm install -g @anthropic-ai/claude-code
+
 COPY data/debs/* /debs/
 RUN dpkg -i /debs/*.deb
 
@@ -43,7 +46,7 @@ USER agentuser
 COPY prepare-sbcl.sh .
 RUN ./prepare-sbcl.sh
 
-COPY load.lisp utils.lisp common.lisp agent.lisp agent-gemini.lisp agent-claude.lisp agent-ollama.lisp .
+COPY load.lisp utils.lisp common.lisp agent.lisp agent-gemini.lisp agent-claude.lisp agent-claudecode.lisp agent-ollama.lisp .
 COPY agent-run.sh .
 
 COPY skills/ ./skills/
