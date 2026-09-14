@@ -20,7 +20,7 @@
 ;;;;   (agent:forget)                   ; wipe the slate
 
 (defpackage :agent-claudecode
-  (:use :cl :utils :common)
+  (:use :cl :utils :common :cl-ansi-text)
   (:export #:run #:use #:forget #:set-model)
   (:nicknames :cc :claudecode :ccode))
 
@@ -52,36 +52,64 @@
 ;;; No HTTP here: the "call" is a subprocess in print mode, JSON in, JSON out.
 ;;; We ask for stream-json (one JSON object per line) instead of a single
 ;;; json blob because that is the only format on which the CLI reports
-;;; rate_limit_event lines alongside the final result line.
+;;; rate_limit_event lines alongside the final result line. --include-partial-
+;;; messages additionally breaks each message into content_block_delta events
+;;; (thinking_delta, text_delta, ...) so we can render them as they arrive
+;;; instead of only seeing the finished message.
 
 (defconstant +UNIX-EPOCH-UNIVERSAL-TIME+ (encode-universal-time 0 0 0 1 1 1970 0))
 
-(defun call-claude (prompt)
-  "Run the claude CLI on PROMPT.
+(defun print-stream-delta (event)
+  "Render a stream_event EVENT live: dim grey for thinking, plain for the
+reply text, with a blank line when the model switches from thinking to
+answering."
+  (when (equal (gethash "type" event) "stream_event")
+    (let* ((inner (gethash "event" event))
+           (inner-type (gethash "type" inner)))
+      (cond
+        ((and (equal inner-type "content_block_start")
+              (equal (gethash "type" (gethash "content_block" inner)) "text"))
+         (format t "~&~%"))
+        ((equal inner-type "content_block_delta")
+         (let* ((delta (gethash "delta" inner))
+                (delta-type (gethash "type" delta)))
+           (cond
+             ((equal delta-type "thinking_delta")
+              (write-string (grey (gethash "thinking" delta))))
+             ((equal delta-type "text_delta")
+              (write-string (gethash "text" delta)))))))
+      (finish-output))))
+
+(defun call-claude (prompt on-event)
+  "Run the claude CLI on PROMPT, calling ON-EVENT with each parsed JSON event
+as it arrives so the caller can render thinking/text while the CLI is still
+working instead of waiting for the process to exit.
 Returns (values answer-text session-id total-cost-usd rate-limit-info)."
   (let* ((session-id (read-session-id))
          (args (append (list "-p" prompt
                               "--output-format" "stream-json"
+                              "--include-partial-messages"
                               "--verbose"
                               "--model" *model*
                               "--permission-mode" *permission-mode*)
                        (when session-id (list "--resume" session-id))))
-         (output (with-output-to-string (out)
-                   (sb-ext:run-program *claude-bin* args
-                                        :output out :error out :search t)))
+         (process (sb-ext:run-program *claude-bin* args
+                                       :output :stream :error t
+                                       :wait nil :search t))
          (result nil)
          (rate-limit nil))
-    (with-input-from-string (in output)
-      (loop for line = (read-line in nil nil)
-            while line
-            unless (zerop (length line))
-              do (ignore-errors
-                   (let* ((event (shasht:read-json line))
-                          (type (gethash "type" event)))
-                     (cond
-                       ((equal type "rate_limit_event")
-                        (setf rate-limit (gethash "rate_limit_info" event)))
-                       ((equal type "result") (setf result event)))))))
+    (loop for line = (read-line (sb-ext:process-output process) nil nil)
+          while line
+          unless (zerop (length line))
+            do (ignore-errors
+                 (let* ((event (shasht:read-json line))
+                        (type (gethash "type" event)))
+                   (funcall on-event event)
+                   (cond
+                     ((equal type "rate_limit_event")
+                      (setf rate-limit (gethash "rate_limit_info" event)))
+                     ((equal type "result") (setf result event))))))
+    (sb-ext:process-wait process)
     (values (gethash "result" result)
             (gethash "session_id" result)
             (gethash "total_cost_usd" result)
@@ -102,8 +130,8 @@ Returns (values answer-text session-id total-cost-usd rate-limit-info)."
   (when window
     (let ((utilization (gethash "utilization" window))
           (resets-at (gethash "resetsAt" window)))
-      (format nil "~a: ~,1f% used, ~,1f% remaining (resets ~a)"
-              label (* 100 utilization) (* 100 (- 1 utilization))
+      (format nil "~a: ~,1f% used - resets ~a"
+              label (* 100 utilization)
               (format-reset-time resets-at)))))
 
 (defun format-usage (cost rate-limit)
@@ -122,12 +150,16 @@ Returns (values answer-text session-id total-cost-usd rate-limit-info)."
 (defun run (prompt)
   (use)
   (set-status STATUS-THINKING)
-  (multiple-value-bind (text session-id cost rate-limit) (call-claude prompt)
+  (format t "~&______~&~%")
+  (multiple-value-bind (text session-id cost rate-limit)
+      (call-claude prompt #'print-stream-delta)
     (when session-id (write-session-id session-id))
     (remember (append (recall)
                        (list (obj "role" "user" "content" prompt)
                              (obj "role" "assistant" "content" text))))
-    (format t "~&______~&~%~a~%~%~a~%~a ~a~%" text (format-usage cost rate-limit) SEP *model*)
+    (format t "~&~%~a~%~a ~a~%"
+			(grey (format-usage cost rate-limit))
+			SEP (grey *model*))
     (set-status STATUS-OK)))
 
 (defun use ()
