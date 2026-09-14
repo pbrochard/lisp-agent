@@ -84,7 +84,7 @@ answering."
   "Run the claude CLI on PROMPT, calling ON-EVENT with each parsed JSON event
 as it arrives so the caller can render thinking/text while the CLI is still
 working instead of waiting for the process to exit.
-Returns (values answer-text session-id total-cost-usd rate-limit-info)."
+Returns (values answer-text session-id total-cost-usd rate-limit-info usage)."
   (let* ((session-id (read-session-id))
          (args (append (list "-p" prompt
                               "--output-format" "stream-json"
@@ -113,7 +113,8 @@ Returns (values answer-text session-id total-cost-usd rate-limit-info)."
     (values (gethash "result" result)
             (gethash "session_id" result)
             (gethash "total_cost_usd" result)
-            rate-limit)))
+            rate-limit
+            (gethash "usage" result))))
 
 ;;; --- usage reporting ---------------------------------------------------
 ;;; Rendered just above the separator so every reply shows where the
@@ -134,13 +135,28 @@ Returns (values answer-text session-id total-cost-usd rate-limit-info)."
               label (* 100 utilization)
               (format-reset-time resets-at)))))
 
-(defun format-usage (cost rate-limit)
+(defun format-tokens (usage)
+  "One line of per-call token counts from a result event's USAGE hash table:
+input/output tokens plus cache read/creation tokens when present."
+  (when usage
+    (let ((input (gethash "input_tokens" usage))
+          (output (gethash "output_tokens" usage))
+          (cache-read (gethash "cache_read_input_tokens" usage))
+          (cache-creation (gethash "cache_creation_input_tokens" usage)))
+      (format nil "Tokens: ~a in, ~a out~@[, ~a cache read~]~@[, ~a cache creation~]"
+              (or input 0) (or output 0)
+              (and cache-read (plusp cache-read) cache-read)
+              (and cache-creation (plusp cache-creation) cache-creation)))))
+
+(defun format-usage (cost rate-limit usage)
   (let* ((windows (and rate-limit (gethash "unifiedWindows" rate-limit)))
          (five-hour (format-window "Session (5h)" (and windows (gethash "five_hour" windows))))
-         (seven-day (format-window "Week (7d)" (and windows (gethash "seven_day" windows)))))
+         (seven-day (format-window "Week (7d)" (and windows (gethash "seven_day" windows))))
+         (tokens (format-tokens usage)))
     (with-output-to-string (s)
       (when five-hour (format s "~a~%" five-hour))
       (when seven-day (format s "~a~%" seven-day))
+      (when tokens (format s "~a~%" tokens))
       (format s "Cost: $~,4f this session" (or cost 0)))))
 
 ;;; --- entry point ------------------------------------------------------------
@@ -151,14 +167,14 @@ Returns (values answer-text session-id total-cost-usd rate-limit-info)."
   (use)
   (set-status STATUS-THINKING)
   (format t "~&______~&~%")
-  (multiple-value-bind (text session-id cost rate-limit)
+  (multiple-value-bind (text session-id cost rate-limit usage)
       (call-claude prompt #'print-stream-delta)
     (when session-id (write-session-id session-id))
     (remember (append (recall)
-                       (list (obj "role" "user" "content" prompt)
-                             (obj "role" "assistant" "content" text))))
+                      (list (obj "role" "user" "content" prompt)
+                            (obj "role" "assistant" "content" text))))
     (format t "~&~%~a~%~a ~a~%"
-			(grey (format-usage cost rate-limit))
+			(grey (format-usage cost rate-limit usage))
 			SEP (grey *model*))
     (set-status STATUS-OK)))
 
