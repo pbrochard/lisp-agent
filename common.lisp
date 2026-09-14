@@ -1,6 +1,6 @@
 (defpackage :common
   (:use :cl :utils :cl-ansi-text)
-  (:export #:SYSTEM-PROMPT #:*CURRENT-RUN-FN* #:*current-model* #:*MEMORY-FILE* #:*SYSTEM-MESSAGE* #:SEP #:RECALL #:REMEMBER #:FORGET-MEM #:BASH #:SET-STATUS #:STATUS-THINKING #:STATUS-OK)
+  (:export #:SYSTEM-PROMPT #:*CURRENT-RUN-FN* #:*current-model* #:*MEMORY-FILE* #:*SYSTEM-MESSAGE* #:SEP #:GREY #:RECALL #:REMEMBER #:FORGET-MEM #:BASH #:SET-STATUS #:STATUS-THINKING #:STATUS-OK)
   (:nicknames :c :co))
 
 (in-package :common)
@@ -13,6 +13,13 @@
 (defconstant SEP (green  "___________________________________________________________________________"))
 (defconstant STATUS-THINKING " thinking...")
 (defconstant STATUS-OK "")
+
+(defun grey (string)
+  "cl-ansi-text only ships the 8 basic ANSI colors; grey needs a 24-bit hex color."
+  (let ((*color-mode* :24bit))
+    (with-output-to-string (s)
+      (with-color ("#808080" :stream s)
+        (write-string string s)))))
 
 ;;; --- memory ---------------------------------------------------------------
 ;;; Messages are already a list of hash tables, i.e. already JSON.
