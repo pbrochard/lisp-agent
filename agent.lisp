@@ -100,7 +100,7 @@ The answer is just (gethash \"content\" (car (last messages)))."
                   (agent-loop
                    (append (recall)
                            (list (obj "role" "user" "content" prompt)))))))
-    (format t "~&______~&~%~a~%~a ~a~%" (gethash "content" (car (last history))) SEP *model*)
+    (format t "~&______~&~%~a~%~a ~a~%" (gethash "content" (car (last history))) SEP (grey *model*))
 	(set-status STATUS-OK)))
 
 (defun use ()

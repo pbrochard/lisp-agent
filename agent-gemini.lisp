@@ -115,7 +115,7 @@
                    (append (recall)
                            (list (obj "role" "user"
                                       "parts" (vector (obj "text" prompt)))))))))
-    (format t "~&______~&~%~a~%~a ~a~%" (final-text (car (last history))) SEP *model*)
+    (format t "~&______~&~%~a~%~a ~a~%" (final-text (car (last history))) SEP (grey *model*))
 	(set-status STATUS-OK)))
 
 (defun use ()
