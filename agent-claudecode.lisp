@@ -21,7 +21,7 @@
 
 (defpackage :agent-claudecode
   (:use :cl :utils :common :cl-ansi-text)
-  (:export #:run #:use #:forget #:set-model)
+  (:export #:run #:use #:forget #:set-model #:list-models #:*models*)
   (:nicknames :cc :claudecode :ccode))
 
 (in-package :agent-claudecode)
@@ -29,6 +29,11 @@
 (defparameter *claude-bin* "claude")
 (defparameter *model* "sonnet")
 (defparameter *permission-mode* "bypassPermissions")
+
+;;; Unlike agent-gemini/agent-claude, the CLI has no models endpoint to query
+;;; (it rides subscription auth, not an API key), so this is just the fixed
+;;; list of aliases --model accepts.
+(defparameter *models* (vector "sonnet" "opus" "fable" "haiku"))
 
 (defconstant MEMORY-FILE "/agent/data/memory-claudecode.json")
 (defconstant SESSION-FILE "/agent/data/session-claudecode.txt")
@@ -191,6 +196,12 @@ input/output tokens plus cache read/creation tokens when present."
     (forget-mem))
   (when (probe-file SESSION-FILE) (delete-file SESSION-FILE)))
 
-(defun set-model (name)
-  (setf *model* name)
+(defun list-models ()
+  (loop for name across *models*
+        for index from 1
+        do (format t "~&[~a] ~a~%" index name)))
+
+(defun set-model (num)
+  (list-models)
+  (setf *model* (aref *models* (- num 1)))
   (use))
