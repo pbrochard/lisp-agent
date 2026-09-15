@@ -21,7 +21,8 @@
 
 (defpackage :agent-claudecode
   (:use :cl :utils :common :cl-ansi-text)
-  (:export #:run #:use #:forget #:set-model #:list-models #:*models*)
+  (:export #:run #:use #:forget #:set-model #:list-models #:lm #:*models*
+           #:set-effort #:list-efforts #:le #:*efforts*)
   (:nicknames :cc :claudecode :ccode))
 
 (in-package :agent-claudecode)
@@ -34,6 +35,12 @@
 ;;; (it rides subscription auth, not an API key), so this is just the fixed
 ;;; list of aliases --model accepts.
 (defparameter *models* (vector "sonnet" "opus" "fable" "haiku"))
+
+(defparameter *effort* nil)
+
+;;; --effort accepts a fixed set of levels; nil means "don't pass the flag"
+;;; and let the CLI use its own default.
+(defparameter *efforts* (vector "low" "medium" "high" "xhigh" "max"))
 
 (defconstant MEMORY-FILE "/agent/data/memory-claudecode.json")
 (defconstant SESSION-FILE "/agent/data/session-claudecode.txt")
@@ -97,6 +104,7 @@ Returns (values answer-text session-id total-cost-usd rate-limit-info usage)."
                               "--verbose"
                               "--model" *model*
                               "--permission-mode" *permission-mode*)
+                       (when *effort* (list "--effort" *effort*))
                        (when session-id (list "--resume" session-id))))
          (process (sb-ext:run-program *claude-bin* args
                                        :output :stream :error t
@@ -201,7 +209,22 @@ input/output tokens plus cache read/creation tokens when present."
         for index from 1
         do (format t "~&[~a] ~a~%" index name)))
 
+(defun lm () (list-models))
+
 (defun set-model (num)
   (list-models)
   (setf *model* (aref *models* (- num 1)))
   (use))
+
+(defun list-efforts ()
+  (loop for name across *efforts*
+        for index from 1
+        do (format t "~&[~a] ~a~%" index name)))
+
+(defun le () (list-efforts))
+
+(defun set-effort (num)
+  (list-efforts)
+  (setf *effort* (aref *efforts* (- num 1)))
+  (use)
+  *effort*)
