@@ -1,5 +1,5 @@
 (defpackage :common
-  (:use :cl :utils :cl-ansi-text)
+  (:use :cl :utils :cl-ansi-text :uiop)
   (:export #:SYSTEM-PROMPT #:*CURRENT-RUN-FN* #:*current-model* #:*MEMORY-FILE* #:*SYSTEM-MESSAGE* #:SEP #:GREY #:RECALL #:REMEMBER #:FORGET-MEM #:BASH #:SET-STATUS #:STATUS-THINKING #:STATUS-OK)
   (:nicknames :c :co))
 
