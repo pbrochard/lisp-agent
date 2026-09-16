@@ -108,6 +108,7 @@ Returns (values answer-text session-id total-cost-usd rate-limit-info usage)."
                        (when session-id (list "--resume" session-id))))
          (process (sb-ext:run-program *claude-bin* args
                                        :output :stream :error t
+                                       :external-format '(:utf-8 :replacement #\?)
                                        :wait nil :search t))
          (result nil)
          (rate-limit nil))
