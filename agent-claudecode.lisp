@@ -38,6 +38,12 @@
 
 (defparameter *effort* nil)
 
+;;; stdout (main thread, streamed deltas) and stderr (its own thread, see
+;;; DRAIN-STDERR) both write to the same terminal. Without a shared lock
+;;; their writes can interleave mid-line whenever both fire around the same
+;;; time, which looks exactly like a long line getting garbled/truncated.
+(defparameter *output-lock* (sb-thread:make-mutex :name "claude-output"))
+
 ;;; The rate_limit_info from the most recent real (non-local-command) call,
 ;;; cached so USAGE can show an exact reset countdown even though /usage
 ;;; itself is answered locally by the CLI and carries no rate-limit payload.
@@ -107,21 +113,22 @@ hot path."
 reply text, with a blank line when the model switches from thinking to
 answering."
   (when (equal (gethash "type" event) "stream_event")
-    (let* ((inner (gethash "event" event))
-           (inner-type (gethash "type" inner)))
-      (cond
-        ((and (equal inner-type "content_block_start")
-              (equal (gethash "type" (gethash "content_block" inner)) "text"))
-         (format t "~&~%"))
-        ((equal inner-type "content_block_delta")
-         (let* ((delta (gethash "delta" inner))
-                (delta-type (gethash "type" delta)))
-           (cond
-             ((equal delta-type "thinking_delta")
-              (write-string (grey (strip-terminal-control-chars (gethash "thinking" delta)))))
-             ((equal delta-type "text_delta")
-              (write-string (strip-terminal-control-chars (gethash "text" delta))))))))
-      (finish-output))))
+    (sb-thread:with-mutex (*output-lock*)
+      (let* ((inner (gethash "event" event))
+             (inner-type (gethash "type" inner)))
+        (cond
+          ((and (equal inner-type "content_block_start")
+                (equal (gethash "type" (gethash "content_block" inner)) "text"))
+           (format t "~&~%"))
+          ((equal inner-type "content_block_delta")
+           (let* ((delta (gethash "delta" inner))
+                  (delta-type (gethash "type" delta)))
+             (cond
+               ((equal delta-type "thinking_delta")
+                (write-string (grey (strip-terminal-control-chars (gethash "thinking" delta)))))
+               ((equal delta-type "text_delta")
+                (write-string (strip-terminal-control-chars (gethash "text" delta))))))))
+        (finish-output)))))
 
 (defun drain-stderr (process)
   "Forward the child process's stderr to *error-output*, sanitizing each
@@ -131,7 +138,9 @@ the CLI's own raw progress/status output (e.g. \\r-redraws) bypass
 sanitization entirely."
   (loop for line = (ignore-errors (read-line (sb-ext:process-error process) nil nil))
         while line
-        do (format *error-output* "[error] ~a~%" (strip-terminal-control-chars line))))
+        do (sb-thread:with-mutex (*output-lock*)
+             (format *error-output* "[error] ~a~%" (strip-terminal-control-chars line))
+             (finish-output *error-output*))))
 
 (defun call-claude (prompt on-event)
   "Run the claude CLI on PROMPT, calling ON-EVENT with each parsed JSON event
@@ -247,10 +256,11 @@ model, so this costs nothing and doesn't touch the conversation history.
 Also prints the exact reset countdown from the last real call, when one
 has happened this session, since /usage's own text has no such payload."
   (multiple-value-bind (text) (call-claude "/usage" (lambda (event) (declare (ignore event))))
-    (format t "~&~a~%" (strip-terminal-control-chars text))
-    (let ((windows (format-windows *last-rate-limit*)))
-      (when (plusp (length windows))
-        (format t "~&~a" (grey windows))))))
+    (sb-thread:with-mutex (*output-lock*)
+      (format t "~&~a~%" (strip-terminal-control-chars text))
+      (let ((windows (format-windows *last-rate-limit*)))
+        (when (plusp (length windows))
+          (format t "~&~a" (grey windows)))))))
 
 (defun run (prompt)
   (use)
@@ -263,9 +273,10 @@ has happened this session, since /usage's own text has no such payload."
     (remember (append (recall)
                       (list (obj "role" "user" "content" prompt)
                             (obj "role" "assistant" "content" (strip-terminal-control-chars text)))))
-    (format t "~&~%~a~%~a ~a~%"
-			(grey (format-usage cost rate-limit usage))
-			SEP (grey *model*))
+    (sb-thread:with-mutex (*output-lock*)
+      (format t "~&~%~a~%~a ~a~%"
+			  (grey (format-usage cost rate-limit usage))
+			  SEP (grey *model*)))
     (set-status STATUS-OK)))
 
 (defun use ()
