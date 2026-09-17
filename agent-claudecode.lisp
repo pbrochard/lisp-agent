@@ -22,7 +22,7 @@
 (defpackage :agent-claudecode
   (:use :cl :utils :common :cl-ansi-text)
   (:export #:run #:use #:forget #:set-model #:list-models #:lm #:*models*
-           #:set-effort #:list-efforts #:le #:*efforts*)
+           #:set-effort #:list-efforts #:le #:*efforts* #:usage)
   (:nicknames :cc :claudecode :ccode))
 
 (in-package :agent-claudecode)
@@ -202,6 +202,13 @@ input/output tokens plus cache read/creation tokens when present."
 ;;; --- entry point ------------------------------------------------------------
 
 (defun use () nil)
+
+(defun usage ()
+  "Print the claude CLI's own /usage report (subscription session/week limits
+and usage breakdown). /usage is answered locally by the CLI, not by the
+model, so this costs nothing and doesn't touch the conversation history."
+  (multiple-value-bind (text) (call-claude "/usage" (lambda (event) (declare (ignore event))))
+    (format t "~&~a~%" (strip-terminal-control-chars text))))
 
 (defun run (prompt)
   (use)
