@@ -1,6 +1,8 @@
 (defpackage :common
   (:use :cl :utils :cl-ansi-text :uiop)
-  (:export #:SYSTEM-PROMPT #:*CURRENT-RUN-FN* #:*current-model* #:*MEMORY-FILE* #:*SYSTEM-MESSAGE* #:SEP #:GREY #:RECALL #:REMEMBER #:FORGET-MEM #:BASH #:CD #:SET-STATUS #:STATUS-THINKING #:STATUS-OK)
+  (:export #:SYSTEM-PROMPT #:*CURRENT-RUN-FN* #:*current-model* #:*MEMORY-FILE* #:*SYSTEM-MESSAGE* #:SEP #:GREY #:RECALL
+		   #:REMEMBER #:FORGET-MEM #:BASH #:CD #:SET-STATUS #:STATUS-THINKING #:STATUS-OK
+		   #:GET-PROMPT #:EP #:RP #:P)
   (:nicknames :c :co))
 
 (in-package :common)
@@ -9,6 +11,9 @@
 
 (defparameter *current-run-fn* nil)
 (defparameter *current-model* "")
+
+(defparameter *editor* "/usr/bin/vi")
+(defconstant PROMP_PATH "/agent/data/prompt.md")
 
 (defconstant SEP (green  "___________________________________________________________________________"))
 (defconstant STATUS-THINKING " thinking...")
@@ -91,3 +96,31 @@
 (defun set-status (status)
   (with-open-file (out "./data/status" :direction :output :if-exists :supersede)
 	(format out "[AI:~a~a]" *current-model* status)))
+
+;; Prompt helpers
+(defun get-prompt ()
+  (let ((prompt ""))
+	(when (probe-file PROMP_PATH)
+	  (with-open-file (in PROMP_PATH :direction :input)
+		(loop for line = (read-line in nil nil)
+			  while line
+			  do (setf prompt (format nil "~a~&~a" prompt line)))))
+	prompt))
+
+(defun print-prompt (prompt)
+  (format t "~a~%" (yellow prompt)))
+
+;; Edit prompt
+(defun ep ()
+  (sb-ext:run-program *editor* `(,PROMP_PATH) :output t :input t :search t)
+  (print-prompt (get-prompt)))
+
+;; Run prompt
+(defun rp ()
+  (print-prompt (get-prompt))
+  (run (get-prompt)))
+
+;; Edit and run prompt
+(defun p ()
+  (ep)
+  (run (get-prompt)))
