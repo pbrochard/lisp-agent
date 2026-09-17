@@ -1,6 +1,6 @@
 (defpackage :common
   (:use :cl :utils :cl-ansi-text :uiop)
-  (:export #:SYSTEM-PROMPT #:*CURRENT-RUN-FN* #:*current-model* #:*MEMORY-FILE* #:*SYSTEM-MESSAGE* #:SEP #:GREY #:RECALL #:REMEMBER #:FORGET-MEM #:BASH #:SET-STATUS #:STATUS-THINKING #:STATUS-OK)
+  (:export #:SYSTEM-PROMPT #:*CURRENT-RUN-FN* #:*current-model* #:*MEMORY-FILE* #:*SYSTEM-MESSAGE* #:SEP #:GREY #:RECALL #:REMEMBER #:FORGET-MEM #:BASH #:CD #:SET-STATUS #:STATUS-THINKING #:STATUS-OK)
   (:nicknames :c :co))
 
 (in-package :common)
@@ -62,6 +62,11 @@
 ;;; Shell helper
 (defun bash ()
   (sb-ext:run-program "/bin/bash" nil :output t :input t :search t))
+
+(defun cd (&optional path)
+  (when path
+	(chdir path))
+  (getcwd))
 
 ;;; Generic run
 (defun run (prompt)
