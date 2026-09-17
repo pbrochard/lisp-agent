@@ -38,6 +38,11 @@
 
 (defparameter *effort* nil)
 
+;;; The rate_limit_info from the most recent real (non-local-command) call,
+;;; cached so USAGE can show an exact reset countdown even though /usage
+;;; itself is answered locally by the CLI and carries no rate-limit payload.
+(defparameter *last-rate-limit* nil)
+
 ;;; --effort accepts a fixed set of levels; nil means "don't pass the flag"
 ;;; and let the CLI use its own default.
 (defparameter *efforts* (vector "low" "medium" "high" "xhigh" "max"))
@@ -178,13 +183,38 @@ Returns (values answer-text session-id total-cost-usd rate-limit-info usage)."
     (declare (ignore sec))
     (format nil "~4,'0d-~2,'0d-~2,'0d ~2,'0d:~2,'0d UTC" year month date hour min)))
 
+(defun format-remaining (epoch-seconds)
+  "Human-readable countdown from now until EPOCH-SECONDS, e.g. \"2d 3h\" or
+\"45m\"."
+  (let* ((now (- (get-universal-time) +UNIX-EPOCH-UNIVERSAL-TIME+))
+         (remaining (max 0 (- epoch-seconds now)))
+         (days (floor remaining 86400))
+         (hours (floor (mod remaining 86400) 3600))
+         (minutes (floor (mod remaining 3600) 60)))
+    (cond
+      ((plusp days) (format nil "~dd ~dh" days hours))
+      ((plusp hours) (format nil "~dh ~dm" hours minutes))
+      (t (format nil "~dm" minutes)))))
+
 (defun format-window (label window)
   (when window
     (let ((utilization (gethash "utilization" window))
           (resets-at (gethash "resetsAt" window)))
-      (format nil "~a: ~,1f% used - resets ~a"
+      (format nil "~a: ~,1f% used - resets ~a (in ~a)"
               label (* 100 utilization)
-              (format-reset-time resets-at)))))
+              (format-reset-time resets-at)
+              (format-remaining resets-at)))))
+
+(defun format-windows (rate-limit)
+  "The Session(5h)/Week(7d) lines alone, empty string when RATE-LIMIT is nil.
+Shared between FORMAT-USAGE (after every real call) and USAGE (which has no
+rate-limit data of its own, since /usage is answered locally by the CLI)."
+  (let* ((windows (and rate-limit (gethash "unifiedWindows" rate-limit)))
+         (five-hour (format-window "Session (5h)" (and windows (gethash "five_hour" windows))))
+         (seven-day (format-window "Week (7d)" (and windows (gethash "seven_day" windows)))))
+    (with-output-to-string (s)
+      (when five-hour (format s "~a~%" five-hour))
+      (when seven-day (format s "~a~%" seven-day)))))
 
 (defun format-tokens (usage)
   "One line of per-call token counts from a result event's USAGE hash table:
@@ -200,13 +230,9 @@ input/output tokens plus cache read/creation tokens when present."
               (and cache-creation (plusp cache-creation) cache-creation)))))
 
 (defun format-usage (cost rate-limit usage)
-  (let* ((windows (and rate-limit (gethash "unifiedWindows" rate-limit)))
-         (five-hour (format-window "Session (5h)" (and windows (gethash "five_hour" windows))))
-         (seven-day (format-window "Week (7d)" (and windows (gethash "seven_day" windows))))
-         (tokens (format-tokens usage)))
+  (let ((tokens (format-tokens usage)))
     (with-output-to-string (s)
-      (when five-hour (format s "~a~%" five-hour))
-      (when seven-day (format s "~a~%" seven-day))
+      (write-string (format-windows rate-limit) s)
       (when tokens (format s "~a~%" tokens))
       (format s "Cost: $~,4f this session" (or cost 0)))))
 
@@ -217,9 +243,14 @@ input/output tokens plus cache read/creation tokens when present."
 (defun usage ()
   "Print the claude CLI's own /usage report (subscription session/week limits
 and usage breakdown). /usage is answered locally by the CLI, not by the
-model, so this costs nothing and doesn't touch the conversation history."
+model, so this costs nothing and doesn't touch the conversation history.
+Also prints the exact reset countdown from the last real call, when one
+has happened this session, since /usage's own text has no such payload."
   (multiple-value-bind (text) (call-claude "/usage" (lambda (event) (declare (ignore event))))
-    (format t "~&~a~%" (strip-terminal-control-chars text))))
+    (format t "~&~a~%" (strip-terminal-control-chars text))
+    (let ((windows (format-windows *last-rate-limit*)))
+      (when (plusp (length windows))
+        (format t "~&~a" (grey windows))))))
 
 (defun run (prompt)
   (use)
@@ -228,6 +259,7 @@ model, so this costs nothing and doesn't touch the conversation history."
   (multiple-value-bind (text session-id cost rate-limit usage)
       (call-claude prompt #'print-stream-delta)
     (when session-id (write-session-id session-id))
+    (when rate-limit (setf *last-rate-limit* rate-limit))
     (remember (append (recall)
                       (list (obj "role" "user" "content" prompt)
                             (obj "role" "assistant" "content" (strip-terminal-control-chars text)))))
