@@ -108,27 +108,35 @@ hot path."
       (remove-if #'unsafe-terminal-char-p string)
       string))
 
-(defun print-stream-delta (event)
-  "Render a stream_event EVENT live: dim grey for thinking, plain for the
-reply text, with a blank line when the model switches from thinking to
-answering."
-  (when (equal (gethash "type" event) "stream_event")
-    (sb-thread:with-mutex (*output-lock*)
-      (let* ((inner (gethash "event" event))
-             (inner-type (gethash "type" inner)))
-        (cond
-          ((and (equal inner-type "content_block_start")
-                (equal (gethash "type" (gethash "content_block" inner)) "text"))
-           (format t "~&~%"))
-          ((equal inner-type "content_block_delta")
-           (let* ((delta (gethash "delta" inner))
-                  (delta-type (gethash "type" delta)))
-             (cond
-               ((equal delta-type "thinking_delta")
-                (write-string (grey (strip-terminal-control-chars (gethash "thinking" delta)))))
-               ((equal delta-type "text_delta")
-                (write-string (strip-terminal-control-chars (gethash "text" delta))))))))
-        (finish-output)))))
+(defun make-stream-printer ()
+  "Return a fresh ON-EVENT callback for CALL-CLAUDE that renders a
+stream_event live: dim grey for thinking, plain for the reply text. Inserts
+a blank-line separator exactly once, at the first transition into a text
+block (thinking -> answering). A reply can contain several text blocks
+when the model calls a tool mid-reply and continues afterward; later text
+blocks are left alone so the live rendering never adds anything the model
+didn't actually write, since that's what also gets persisted to memory."
+  (let ((seen-text-p nil))
+    (lambda (event)
+      (when (equal (gethash "type" event) "stream_event")
+        (sb-thread:with-mutex (*output-lock*)
+          (let* ((inner (gethash "event" event))
+                 (inner-type (gethash "type" inner)))
+            (cond
+              ((and (not seen-text-p)
+                    (equal inner-type "content_block_start")
+                    (equal (gethash "type" (gethash "content_block" inner)) "text"))
+               (setf seen-text-p t)
+               (format t "~&~%"))
+              ((equal inner-type "content_block_delta")
+               (let* ((delta (gethash "delta" inner))
+                      (delta-type (gethash "type" delta)))
+                 (cond
+                   ((equal delta-type "thinking_delta")
+                    (write-string (grey (strip-terminal-control-chars (gethash "thinking" delta)))))
+                   ((equal delta-type "text_delta")
+                    (write-string (strip-terminal-control-chars (gethash "text" delta))))))))
+            (finish-output)))))))
 
 (defun drain-stderr (process)
   "Forward the child process's stderr to *error-output*, sanitizing each
@@ -267,7 +275,7 @@ has happened this session, since /usage's own text has no such payload."
   (set-status STATUS-THINKING)
   (format t "~&______~&~%")
   (multiple-value-bind (text session-id cost rate-limit usage)
-      (call-claude prompt #'print-stream-delta)
+      (call-claude prompt (make-stream-printer))
     (when session-id (write-session-id session-id))
     (when rate-limit (setf *last-rate-limit* rate-limit))
     (remember (append (recall)
