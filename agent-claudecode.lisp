@@ -118,6 +118,16 @@ answering."
               (write-string (strip-terminal-control-chars (gethash "text" delta))))))))
       (finish-output))))
 
+(defun drain-stderr (process)
+  "Forward the child process's stderr to *error-output*, sanitizing each
+line first. Runs on its own thread so it can drain concurrently with the
+main stdout loop — :error t would inherit the terminal directly and let
+the CLI's own raw progress/status output (e.g. \\r-redraws) bypass
+sanitization entirely."
+  (loop for line = (ignore-errors (read-line (sb-ext:process-error process) nil nil))
+        while line
+        do (format *error-output* "[error] ~a~%" (strip-terminal-control-chars line))))
+
 (defun call-claude (prompt on-event)
   "Run the claude CLI on PROMPT, calling ON-EVENT with each parsed JSON event
 as it arrives so the caller can render thinking/text while the CLI is still
@@ -133,11 +143,12 @@ Returns (values answer-text session-id total-cost-usd rate-limit-info usage)."
                        (when *effort* (list "--effort" *effort*))
                        (when session-id (list "--resume" session-id))))
          (process (sb-ext:run-program *claude-bin* args
-                                       :output :stream :error t
+                                       :output :stream :error :stream
                                        :external-format '(:utf-8 :replacement #\?)
                                        :wait nil :search t))
          (result nil)
          (rate-limit nil))
+    (sb-thread:make-thread (lambda () (drain-stderr process)) :name "claude-stderr")
     (loop for line = (read-line (sb-ext:process-output process) nil nil)
           while line
           unless (zerop (length line))
