@@ -71,6 +71,21 @@
 
 (defconstant +UNIX-EPOCH-UNIVERSAL-TIME+ (encode-universal-time 0 0 0 1 1 1970 0))
 
+(defun strip-terminal-control-chars (string)
+  "Strip control characters that could rewrite or erase already-printed
+terminal output — backspace, carriage return, ESC (which introduces ANSI
+cursor-movement/erase sequences), DEL, and other C0 controls — while
+leaving newlines and tabs intact. Model output is untrusted and must not
+be allowed to manipulate the terminal it's printed to."
+  (remove-if (lambda (ch)
+               (let ((code (char-code ch)))
+                 (or (= code 8)                        ; backspace
+                     (= code 13)                        ; carriage return
+                     (= code 27)                        ; ESC
+                     (= code 127)                        ; DEL
+                     (and (< code 32) (not (member code '(9 10)))))))
+             string))
+
 (defun print-stream-delta (event)
   "Render a stream_event EVENT live: dim grey for thinking, plain for the
 reply text, with a blank line when the model switches from thinking to
@@ -87,9 +102,9 @@ answering."
                 (delta-type (gethash "type" delta)))
            (cond
              ((equal delta-type "thinking_delta")
-              (write-string (grey (gethash "thinking" delta))))
+              (write-string (grey (strip-terminal-control-chars (gethash "thinking" delta)))))
              ((equal delta-type "text_delta")
-              (write-string (gethash "text" delta)))))))
+              (write-string (strip-terminal-control-chars (gethash "text" delta))))))))
       (finish-output))))
 
 (defun call-claude (prompt on-event)
