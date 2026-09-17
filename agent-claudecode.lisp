@@ -73,16 +73,15 @@
 
 (defun strip-terminal-control-chars (string)
   "Strip control characters that could rewrite or erase already-printed
-terminal output — backspace, carriage return, ESC (which introduces ANSI
-cursor-movement/erase sequences), DEL, and other C0 controls — while
-leaving newlines and tabs intact. Model output is untrusted and must not
-be allowed to manipulate the terminal it's printed to."
+terminal output — C0 controls (backspace, carriage return, ESC, ...), DEL,
+and C1 controls (0x80-0x9F, the 8-bit equivalents of ESC-introduced CSI/OSC
+sequences some terminals honor) — while leaving newlines and tabs intact.
+Model output is untrusted and must not be allowed to manipulate the
+terminal it's printed to."
   (remove-if (lambda (ch)
                (let ((code (char-code ch)))
-                 (or (= code 8)                        ; backspace
-                     (= code 13)                        ; carriage return
-                     (= code 27)                        ; ESC
-                     (= code 127)                        ; DEL
+                 (or (= code 127)                       ; DEL
+                     (<= #x80 code #x9F)                 ; C1 controls
                      (and (< code 32) (not (member code '(9 10)))))))
              string))
 
