@@ -2,7 +2,7 @@
   (:use :cl :utils :cl-ansi-text :uiop)
   (:export #:SYSTEM-PROMPT #:*CURRENT-RUN-FN* #:*current-model* #:*MEMORY-FILE* #:*SYSTEM-MESSAGE* #:SEP #:GREY #:RECALL
 		   #:REMEMBER #:FORGET-MEM #:BASH #:CD #:SET-STATUS #:STATUS-THINKING #:STATUS-OK
-		   #:GET-PROMPT #:EP #:RP #:P)
+		   #:GET-PROMPT #:EP #:RP #:P #:ENP #:NP)
   (:nicknames :c :co))
 
 (in-package :common)
@@ -18,6 +18,10 @@
 (defconstant SEP (green  "___________________________________________________________________________"))
 (defconstant STATUS-THINKING " thinking...")
 (defconstant STATUS-OK "")
+
+(defmacro defalias (alias original)
+  "Make ALIAS share ORIGINAL's function object, so calling ALIAS doesn't add an extra funcall."
+  `(setf (fdefinition ',alias) (fdefinition ',original)))
 
 (defun grey (string)
   "cl-ansi-text only ships the 8 basic ANSI colors; grey needs a 24-bit hex color."
@@ -111,16 +115,38 @@
   (format t "~a~%" (yellow prompt)))
 
 ;; Edit prompt
-(defun ep ()
+(defun edit-prompt ()
   (sb-ext:run-program *editor* `(,PROMP_PATH) :output t :input t :search t)
   (print-prompt (get-prompt)))
 
+(defalias ep edit-prompt)
+
+;; Edit new prompt
+(defun edit-new-prompt ()
+  (when (probe-file PROMP_PATH)
+	(delete-file PROMP_PATH))
+  (edit-prompt))
+
+(defalias enp edit-new-prompt)
+
 ;; Run prompt
-(defun rp ()
+(defun run-prompt ()
   (print-prompt (get-prompt))
   (run (get-prompt)))
 
+(defalias rp run-prompt)
+
 ;; Edit and run prompt
-(defun p ()
-  (ep)
+(defun edit-run-prompt ()
+  (edit-prompt)
   (run (get-prompt)))
+
+(defalias p edit-run-prompt)
+
+;; Edit and run new prompt
+(defun edit-run-new-prompt ()
+  (edit-new-prompt)
+  (run (get-prompt)))
+
+(defalias np edit-run-new-prompt)
+
