@@ -2,7 +2,7 @@
   (:use :cl :utils :cl-ansi-text :uiop)
   (:export #:SYSTEM-PROMPT #:*CURRENT-RUN-FN* #:*current-model* #:*MEMORY-FILE* #:*SYSTEM-MESSAGE* #:SEP #:GREY #:RECALL
 		   #:REMEMBER #:FORGET-MEM #:BASH #:CD #:SET-STATUS #:STATUS-THINKING #:STATUS-OK
-		   #:GET-PROMPT #:EP #:RP #:P #:ENP #:NP)
+		   #:GET-PROMPT #:EP #:RP #:P #:ENP #:NP #:R)
   (:nicknames :c :co))
 
 (in-package :common)
@@ -149,4 +149,5 @@
   (run (get-prompt)))
 
 (defalias np edit-run-new-prompt)
+(defalias r edit-run-new-prompt)
 
