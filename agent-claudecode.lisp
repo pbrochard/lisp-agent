@@ -71,19 +71,31 @@
 
 (defconstant +UNIX-EPOCH-UNIVERSAL-TIME+ (encode-universal-time 0 0 0 1 1 1970 0))
 
+(defun unsafe-terminal-char-p (ch)
+  "True for a character that could rewrite/erase already-printed terminal
+output or visually spoof it: C0 controls (backspace, carriage return, ESC,
+...), DEL, C1 controls (0x80-0x9F, the 8-bit equivalents of ESC-introduced
+CSI/OSC sequences some terminals honor), and Unicode bidi-override /
+directional-isolate formatting characters (U+202A-U+202E, U+2066-U+2069)
+that terminals honoring bidi can use to visually reorder displayed text.
+Newlines and tabs are left alone."
+  (let ((code (char-code ch)))
+    (or (= code 127)                                 ; DEL
+        (<= #x80 code #x9F)                          ; C1 controls
+        (<= #x202A code #x202E)                      ; bidi embeddings/overrides
+        (<= #x2066 code #x2069)                      ; bidi isolates
+        (and (< code 32) (not (member code '(9 10)))))))
+
 (defun strip-terminal-control-chars (string)
-  "Strip control characters that could rewrite or erase already-printed
-terminal output — C0 controls (backspace, carriage return, ESC, ...), DEL,
-and C1 controls (0x80-0x9F, the 8-bit equivalents of ESC-introduced CSI/OSC
-sequences some terminals honor) — while leaving newlines and tabs intact.
-Model output is untrusted and must not be allowed to manipulate the
-terminal it's printed to."
-  (remove-if (lambda (ch)
-               (let ((code (char-code ch)))
-                 (or (= code 127)                       ; DEL
-                     (<= #x80 code #x9F)                 ; C1 controls
-                     (and (< code 32) (not (member code '(9 10)))))))
-             string))
+  "Strip characters that could rewrite, erase, or visually spoof
+already-printed terminal output (see UNSAFE-TERMINAL-CHAR-P). Model output
+is untrusted and must not be allowed to manipulate the terminal it's
+printed to. Returns STRING unchanged (no copy) when nothing needs
+stripping, since that is the overwhelmingly common case on the streaming
+hot path."
+  (if (find-if #'unsafe-terminal-char-p string)
+      (remove-if #'unsafe-terminal-char-p string)
+      string))
 
 (defun print-stream-delta (event)
   "Render a stream_event EVENT live: dim grey for thinking, plain for the
@@ -200,7 +212,7 @@ input/output tokens plus cache read/creation tokens when present."
     (when session-id (write-session-id session-id))
     (remember (append (recall)
                       (list (obj "role" "user" "content" prompt)
-                            (obj "role" "assistant" "content" text))))
+                            (obj "role" "assistant" "content" (strip-terminal-control-chars text)))))
     (format t "~&~%~a~%~a ~a~%"
 			(grey (format-usage cost rate-limit usage))
 			SEP (grey *model*))
