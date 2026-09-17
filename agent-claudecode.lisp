@@ -173,7 +173,12 @@ Returns (values answer-text session-id total-cost-usd rate-limit-info usage)."
                               "--include-partial-messages"
                               "--verbose"
                               "--model" *model*
-                              "--permission-mode" *permission-mode*)
+                              "--permission-mode" *permission-mode*
+                              ;; The CLI can write its own decorative UI (spinners,
+                              ;; borders, animations) straight to the terminal,
+                              ;; bypassing our stdout/stderr pipes entirely — this
+                              ;; flag turns that off at the source.
+                              "--ax-screen-reader")
                        (when *effort* (list "--effort" *effort*))
                        (when session-id (list "--resume" session-id))))
          (process (sb-ext:run-program *claude-bin* args
