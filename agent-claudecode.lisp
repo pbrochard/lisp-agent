@@ -110,33 +110,45 @@ hot path."
 
 (defun make-stream-printer ()
   "Return a fresh ON-EVENT callback for CALL-CLAUDE that renders a
-stream_event live: dim grey for thinking, plain for the reply text. Inserts
-a blank-line separator exactly once, at the first transition into a text
-block (thinking -> answering). A reply can contain several text blocks
-when the model calls a tool mid-reply and continues afterward; later text
-blocks are left alone so the live rendering never adds anything the model
-didn't actually write, since that's what also gets persisted to memory."
-  (let ((seen-text-p nil))
-    (lambda (event)
-      (when (equal (gethash "type" event) "stream_event")
-        (sb-thread:with-mutex (*output-lock*)
-          (let* ((inner (gethash "event" event))
-                 (inner-type (gethash "type" inner)))
-            (cond
-              ((and (not seen-text-p)
-                    (equal inner-type "content_block_start")
-                    (equal (gethash "type" (gethash "content_block" inner)) "text"))
-               (setf seen-text-p t)
-               (format t "~&~%"))
-              ((equal inner-type "content_block_delta")
-               (let* ((delta (gethash "delta" inner))
-                      (delta-type (gethash "type" delta)))
-                 (cond
-                   ((equal delta-type "thinking_delta")
-                    (write-string (grey (strip-terminal-control-chars (gethash "thinking" delta)))))
-                   ((equal delta-type "text_delta")
-                    (write-string (strip-terminal-control-chars (gethash "text" delta))))))))
-            (finish-output)))))))
+stream_event live: dim grey for thinking, plain for the reply text. Ensures
+exactly one blank line separates each transition into a text block —
+thinking -> answering, but also text -> tool call -> text when the model
+keeps talking after using a tool — regardless of how many newlines the
+model's own content happens to carry across that boundary. Tracked via the
+count of trailing newlines already written (capped at 2) rather than an
+unconditional insert, since always inserting one (the previous approach)
+double-spaced whenever the model's own text already supplied the gap, and
+inserting only once ever under-spaced every later transition."
+  (let ((trailing-newlines 2)) ; RUN's own preamble already ends on a blank line
+    (labels ((track! (str)
+               (loop for ch across str
+                     do (setf trailing-newlines (if (char= ch #\Newline) (min 2 (1+ trailing-newlines)) 0))))
+             (ensure-blank-line ()
+               (loop while (< trailing-newlines 2)
+                     do (write-char #\Newline)
+                        (incf trailing-newlines))))
+      (lambda (event)
+        (when (equal (gethash "type" event) "stream_event")
+          (sb-thread:with-mutex (*output-lock*)
+            (let* ((inner (gethash "event" event))
+                   (inner-type (gethash "type" inner)))
+              (cond
+                ((and (equal inner-type "content_block_start")
+                      (equal (gethash "type" (gethash "content_block" inner)) "text"))
+                 (ensure-blank-line))
+                ((equal inner-type "content_block_delta")
+                 (let* ((delta (gethash "delta" inner))
+                        (delta-type (gethash "type" delta)))
+                   (cond
+                     ((equal delta-type "thinking_delta")
+                      (let ((clean (strip-terminal-control-chars (gethash "thinking" delta))))
+                        (write-string (grey clean))
+                        (track! clean)))
+                     ((equal delta-type "text_delta")
+                      (let ((clean (strip-terminal-control-chars (gethash "text" delta))))
+                        (write-string clean)
+                        (track! clean)))))))
+              (finish-output))))))))
 
 (defun drain-stderr (process)
   "Forward the child process's stderr to *error-output*, sanitizing each
