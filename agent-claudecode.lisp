@@ -114,6 +114,45 @@ through even though model output is otherwise untrusted."
                (t (return nil)))
           finally (return nil))))
 
+(defun bare-sgr-sequence-end (string start)
+  "Like SGR-SEQUENCE-END, but for a bare sequence that's missing its
+leading ESC byte -- STRING's index START must point at the #\\[ itself.
+The model's own generated text has been observed to drop the ESC byte of
+a quoted/relayed SGR sequence while keeping the surrounding printable
+characters (\"[33m\" instead of ESC[33m), so this detects that shape to
+let RECONSTRUCT-MISSING-SGR-ESCAPES put the missing byte back."
+  (when (and (< start (length string)) (char= (char string start) #\[))
+    (loop for i from (1+ start) below (length string)
+          for ch = (char string i)
+          do (cond
+               ((or (digit-char-p ch) (char= ch #\;)))
+               ((char= ch #\m) (return (1+ i)))
+               (t (return nil)))
+          finally (return nil))))
+
+(defun reconstruct-missing-sgr-escapes (string)
+  "Insert a real ESC byte before any bare SGR-looking sequence (see
+BARE-SGR-SEQUENCE-END) so it renders as color instead of showing up as
+literal \"[33m\"-style text. Only fires on that narrow digits/semicolons/m
+shape, which is unusual enough in ordinary prose that this shouldn't
+false-positive on legitimate bracketed text."
+  (if (find #\[ string)
+      (with-output-to-string (out)
+        (loop with len = (length string)
+              with i = 0
+              while (< i len)
+              do (cond
+                   ((and (char= (char string i) #\[)
+                         (not (and (plusp i) (char= (char string (1- i)) #\Escape)))
+                         (bare-sgr-sequence-end string i))
+                    (write-char #\Escape out)
+                    (write-char (char string i) out)
+                    (incf i))
+                   (t
+                    (write-char (char string i) out)
+                    (incf i)))))
+      string))
+
 (defun strip-terminal-control-chars (string)
   "Strip characters that could rewrite, erase, or visually spoof
 already-printed terminal output (see UNSAFE-TERMINAL-CHAR-P), while letting
@@ -177,7 +216,8 @@ inserting only once ever under-spaced every later transition."
                                  ((equal delta-type "thinking_delta")
                                   (strip-terminal-control-chars (gethash "thinking" delta)))
                                  ((equal delta-type "text_delta")
-                                  (strip-terminal-control-chars (gethash "text" delta))))))
+                                  (strip-terminal-control-chars
+                                   (reconstruct-missing-sgr-escapes (gethash "text" delta)))))))
                    ;; Many thinking_delta chunks arrive genuinely empty; skip
                    ;; the write+flush entirely rather than doing a no-op
                    ;; syscall for invisible content on every single one.
