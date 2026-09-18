@@ -24,8 +24,15 @@
   `(setf (fdefinition ',alias) (fdefinition ',original)))
 
 (defun grey (string)
-  "cl-ansi-text only ships the 8 basic ANSI colors; grey needs a 24-bit hex color."
-  (let ((*color-mode* :24bit))
+  "cl-ansi-text only ships the 8 basic ANSI colors, none of them grey, so this
+needs a wider palette. :24bit (truecolor, 38;2;r;g;b) looks right in a
+directly-attached terminal but many terminal emulators/multiplexers -- tmux
+or screen without an explicit Tc/RGB override, older terminal apps, some
+SSH/web terminals -- don't understand it and silently render the default
+foreground color instead of grey. :8bit (the 256-color palette, 38;5;n) has
+been near-universally supported since the late 90s, so it renders as grey
+almost everywhere truecolor might silently fail."
+  (let ((*color-mode* :8bit))
     (with-output-to-string (s)
       (with-color ("#808080" :stream s)
         (write-string string s)))))
