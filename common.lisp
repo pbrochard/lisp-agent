@@ -114,6 +114,16 @@
 (defun print-prompt (prompt)
   (format t "~a~%" (yellow prompt)))
 
+(defconstant CANCEL-MARKER "!no!")
+
+;; Lets a prompt written to the prompt file veto its own run: typing !no!
+;; anywhere in it (e.g. after editing and changing your mind) skips RUN
+;; instead of deleting the whole prompt.
+(defun run-unless-cancelled (prompt)
+  (if (search CANCEL-MARKER prompt)
+	  (format t "~&Cancelled: prompt contains `~a`.~%~a~%" CANCEL-MARKER SEP)
+	  (run prompt)))
+
 ;; Edit prompt
 (defun edit-prompt ()
   (sb-ext:run-program *editor* `(,PROMP_PATH) :output t :input t :search t)
@@ -133,23 +143,21 @@
 (defun run-prompt ()
   (let ((prompt (get-prompt)))
 	(print-prompt prompt)
-	(run prompt)))
+	(run-unless-cancelled prompt)))
 
 (defalias rp run-prompt)
 
 ;; Edit and run prompt
 (defun edit-run-prompt ()
   (edit-prompt)
-  (let ((prompt (get-prompt)))
-	(run prompt)))
+  (run-unless-cancelled (get-prompt)))
 
 (defalias p edit-run-prompt)
 
 ;; Edit and run new prompt
 (defun edit-run-new-prompt ()
   (edit-new-prompt)
-  (let ((prompt (get-prompt)))
-	(run prompt)))
+  (run-unless-cancelled (get-prompt)))
 
 (defalias np edit-run-new-prompt)
 (defalias r edit-run-new-prompt)
