@@ -278,8 +278,12 @@ from so it's visually distinct from the main agent's own narration."
                                   ((equal (gethash "type" block) "thinking")
                                    (print-subagent-block "thinking" subagent-name block)))))
                      (loop for block across blocks
+                           ;; This CLI build calls the subagent-spawning tool
+                           ;; "Agent" (older/other builds call it "Task") --
+                           ;; match either name so this doesn't silently stop
+                           ;; naming subagents if that ever changes back.
                            when (and (equal (gethash "type" block) "tool_use")
-                                     (equal (gethash "name" block) "Task"))
+                                     (member (gethash "name" block) '("Agent" "Task") :test #'equal))
                              do (let* ((input (gethash "input" block))
                                        (subagent-name (or (gethash "description" input)
                                                            (gethash "subagent_type" input))))
