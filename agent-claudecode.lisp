@@ -202,37 +202,70 @@ early, unfixed."
 ends right there -- emit it as literal, unfixed text rather than losing it."
                (unless (zerop (length pending-bracket))
                  (write-string pending-bracket)
-                 (setf pending-bracket ""))))
+                 (setf pending-bracket "")))
+             (print-subagent-block (label block)
+               "A --forward-subagent-text block arrives as a single
+complete string (not incremental deltas like the main agent's own
+content), so there's no chunk-boundary/SGR-buffering concern here -- just
+sanitize and print it as one unit, tagged so it's visually distinct from
+the main agent's own narration."
+               (let ((clean (strip-terminal-control-chars (gethash label block))))
+                 (unless (zerop (length clean))
+                   (flush-pending!)
+                   (ensure-blank-line)
+                   (let ((line (format nil "  ⤷ [subagent] ~a~%" clean)))
+                     (write-string (grey line))
+                     (track! line))
+                   (finish-output)))))
       (lambda (event)
-        (when (equal (gethash "type" event) "stream_event")
-          (sb-thread:with-mutex (*output-lock*)
-            (let* ((inner (gethash "event" event))
-                   (inner-type (gethash "type" inner)))
-              (cond
-                ((and (equal inner-type "content_block_start")
-                      (equal (gethash "type" (gethash "content_block" inner)) "text"))
-                 (flush-pending!)
-                 (ensure-blank-line)
-                 (finish-output))
-                ((equal inner-type "content_block_stop")
-                 (flush-pending!)
-                 (finish-output))
-                ((equal inner-type "content_block_delta")
-                 (let* ((delta (gethash "delta" inner))
-                        (delta-type (gethash "type" delta))
-                        (clean (cond
-                                 ((equal delta-type "thinking_delta")
-                                  (strip-terminal-control-chars (gethash "thinking" delta)))
-                                 ((equal delta-type "text_delta")
-                                  (strip-terminal-control-chars
-                                   (reconstruct-and-buffer (gethash "text" delta)))))))
-                   ;; Many thinking_delta chunks arrive genuinely empty; skip
-                   ;; the write+flush entirely rather than doing a no-op
-                   ;; syscall for invisible content on every single one.
-                   (when (and clean (plusp (length clean)))
-                     (write-string (if (equal delta-type "thinking_delta") (grey clean) clean))
-                     (track! clean)
-                     (finish-output))))))))))))
+        (let ((event-type (gethash "type" event)))
+          (cond
+            ((equal event-type "stream_event")
+             (sb-thread:with-mutex (*output-lock*)
+               (let* ((inner (gethash "event" event))
+                      (inner-type (gethash "type" inner)))
+                 (cond
+                   ((and (equal inner-type "content_block_start")
+                         (equal (gethash "type" (gethash "content_block" inner)) "text"))
+                    (flush-pending!)
+                    (ensure-blank-line)
+                    (finish-output))
+                   ((equal inner-type "content_block_stop")
+                    (flush-pending!)
+                    (finish-output))
+                   ((equal inner-type "content_block_delta")
+                    (let* ((delta (gethash "delta" inner))
+                           (delta-type (gethash "type" delta))
+                           (clean (cond
+                                    ((equal delta-type "thinking_delta")
+                                     (strip-terminal-control-chars (gethash "thinking" delta)))
+                                    ((equal delta-type "text_delta")
+                                     (strip-terminal-control-chars
+                                      (reconstruct-and-buffer (gethash "text" delta)))))))
+                      ;; Many thinking_delta chunks arrive genuinely empty; skip
+                      ;; the write+flush entirely rather than doing a no-op
+                      ;; syscall for invisible content on every single one.
+                      (when (and clean (plusp (length clean)))
+                        (write-string (if (equal delta-type "thinking_delta") (grey clean) clean))
+                        (track! clean)
+                        (finish-output))))))))
+            ;; --forward-subagent-text relays a subagent's own text/thinking
+            ;; as whole top-level assistant/user messages tagged with the
+            ;; Task tool_use id that spawned it, instead of leaving
+            ;; subagent-heavy turns totally silent. shasht parses JSON null
+            ;; as the truthy keyword :NULL, not NIL -- without excluding it
+            ;; explicitly, the top-level's own messages (which carry an
+            ;; explicit "parent_tool_use_id":null) would wrongly match too.
+            ((and (member event-type '("assistant" "user") :test #'equal)
+                  (let ((parent (gethash "parent_tool_use_id" event)))
+                    (and parent (not (eq parent :null)))))
+             (sb-thread:with-mutex (*output-lock*)
+               (loop for block across (or (gethash "content" (gethash "message" event)) #())
+                     do (cond
+                          ((equal (gethash "type" block) "text")
+                           (print-subagent-block "text" block))
+                          ((equal (gethash "type" block) "thinking")
+                           (print-subagent-block "thinking" block))))))))))))
 
 (defun drain-stderr (process)
   "Forward the child process's stderr to *error-output*, sanitizing each
@@ -262,7 +295,11 @@ Returns (values answer-text session-id total-cost-usd rate-limit-info usage)."
                               ;; borders, animations) straight to the terminal,
                               ;; bypassing our stdout/stderr pipes entirely — this
                               ;; flag turns that off at the source.
-                              "--ax-screen-reader")
+                              "--ax-screen-reader"
+                              ;; Without this, a subagent-heavy turn (Task tool)
+                              ;; is completely silent until the subagent finishes;
+                              ;; this surfaces its text/thinking as it happens.
+                              "--forward-subagent-text")
                        (when *effort* (list "--effort" *effort*))
                        (when session-id (list "--resume" session-id))))
          (process (sb-ext:run-program *claude-bin* args
