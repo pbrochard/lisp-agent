@@ -114,45 +114,6 @@ through even though model output is otherwise untrusted."
                (t (return nil)))
           finally (return nil))))
 
-(defun bare-sgr-sequence-end (string start)
-  "Like SGR-SEQUENCE-END, but for a bare sequence that's missing its
-leading ESC byte -- STRING's index START must point at the #\\[ itself.
-The model's own generated text has been observed to drop the ESC byte of
-a quoted/relayed SGR sequence while keeping the surrounding printable
-characters (\"[33m\" instead of ESC[33m), so this detects that shape to
-let RECONSTRUCT-MISSING-SGR-ESCAPES put the missing byte back."
-  (when (and (< start (length string)) (char= (char string start) #\[))
-    (loop for i from (1+ start) below (length string)
-          for ch = (char string i)
-          do (cond
-               ((or (digit-char-p ch) (char= ch #\;)))
-               ((char= ch #\m) (return (1+ i)))
-               (t (return nil)))
-          finally (return nil))))
-
-(defun reconstruct-missing-sgr-escapes (string)
-  "Insert a real ESC byte before any bare SGR-looking sequence (see
-BARE-SGR-SEQUENCE-END) so it renders as color instead of showing up as
-literal \"[33m\"-style text. Only fires on that narrow digits/semicolons/m
-shape, which is unusual enough in ordinary prose that this shouldn't
-false-positive on legitimate bracketed text."
-  (if (find #\[ string)
-      (with-output-to-string (out)
-        (loop with len = (length string)
-              with i = 0
-              while (< i len)
-              do (cond
-                   ((and (char= (char string i) #\[)
-                         (not (and (plusp i) (char= (char string (1- i)) #\Escape)))
-                         (bare-sgr-sequence-end string i))
-                    (write-char #\Escape out)
-                    (write-char (char string i) out)
-                    (incf i))
-                   (t
-                    (write-char (char string i) out)
-                    (incf i)))))
-      string))
-
 (defun strip-terminal-control-chars (string)
   "Strip characters that could rewrite, erase, or visually spoof
 already-printed terminal output (see UNSAFE-TERMINAL-CHAR-P), while letting
@@ -191,14 +152,57 @@ count of trailing newlines already written (capped at 2) rather than an
 unconditional insert, since always inserting one (the previous approach)
 double-spaced whenever the model's own text already supplied the gap, and
 inserting only once ever under-spaced every later transition."
-  (let ((trailing-newlines 2)) ; RUN's own preamble already ends on a blank line
+  (let ((trailing-newlines 2) ; RUN's own preamble already ends on a blank line
+        (pending-bracket ""))
     (labels ((track! (str)
                (loop for ch across str
                      do (setf trailing-newlines (if (char= ch #\Newline) (min 2 (1+ trailing-newlines)) 0))))
              (ensure-blank-line ()
                (loop while (< trailing-newlines 2)
                      do (write-char #\Newline)
-                        (incf trailing-newlines))))
+                        (incf trailing-newlines)))
+             (reconstruct-and-buffer (str)
+               "Like RECONSTRUCT-MISSING-SGR-ESCAPES, but a bare SGR sequence
+can itself be split across delta chunks (\"[3\" then \"3m\") just like
+anything else in a stream. A trailing '[' still plausibly mid-sequence
+(only digits/semicolons so far, no terminator) is held in PENDING-BRACKET
+and prepended to the next chunk instead of being emitted -- and reset --
+early, unfixed."
+               (let* ((full (concatenate 'string pending-bracket str))
+                      (len (length full)))
+                 (setf pending-bracket "")
+                 (with-output-to-string (out)
+                   (loop with i = 0
+                         while (< i len)
+                         do (if (char= (char full i) #\[)
+                                (let ((end (loop for j from (1+ i) below len
+                                                  for ch = (char full j)
+                                                  do (cond
+                                                       ((or (digit-char-p ch) (char= ch #\;)))
+                                                       ((char= ch #\m) (return (1+ j)))
+                                                       (t (return nil)))
+                                                  finally (return :incomplete))))
+                                  (cond
+                                    ((eq end :incomplete)
+                                     (setf pending-bracket (subseq full i))
+                                     (setf i len))
+                                    (end
+                                     (unless (and (plusp i) (char= (char full (1- i)) #\Escape))
+                                       (write-char #\Escape out))
+                                     (write-string full out :start i :end end)
+                                     (setf i end))
+                                    (t
+                                     (write-char (char full i) out)
+                                     (incf i))))
+                                (progn
+                                  (write-char (char full i) out)
+                                  (incf i)))))))
+             (flush-pending! ()
+               "A held-back PENDING-BRACKET never completes if the block
+ends right there -- emit it as literal, unfixed text rather than losing it."
+               (unless (zerop (length pending-bracket))
+                 (write-string pending-bracket)
+                 (setf pending-bracket ""))))
       (lambda (event)
         (when (equal (gethash "type" event) "stream_event")
           (sb-thread:with-mutex (*output-lock*)
@@ -207,7 +211,11 @@ inserting only once ever under-spaced every later transition."
               (cond
                 ((and (equal inner-type "content_block_start")
                       (equal (gethash "type" (gethash "content_block" inner)) "text"))
+                 (flush-pending!)
                  (ensure-blank-line)
+                 (finish-output))
+                ((equal inner-type "content_block_stop")
+                 (flush-pending!)
                  (finish-output))
                 ((equal inner-type "content_block_delta")
                  (let* ((delta (gethash "delta" inner))
@@ -217,7 +225,7 @@ inserting only once ever under-spaced every later transition."
                                   (strip-terminal-control-chars (gethash "thinking" delta)))
                                  ((equal delta-type "text_delta")
                                   (strip-terminal-control-chars
-                                   (reconstruct-missing-sgr-escapes (gethash "text" delta)))))))
+                                   (reconstruct-and-buffer (gethash "text" delta)))))))
                    ;; Many thinking_delta chunks arrive genuinely empty; skip
                    ;; the write+flush entirely rather than doing a no-op
                    ;; syscall for invisible content on every single one.
