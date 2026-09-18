@@ -97,15 +97,48 @@ Newlines and tabs are left alone."
         (<= #x2066 code #x2069)                      ; bidi isolates
         (and (< code 32) (not (member code '(9 10)))))))
 
+(defun sgr-sequence-end (string start)
+  "If a well-formed SGR (color/attribute) escape sequence ESC[<params>m
+starts at STRING's index START (which must be the ESC byte itself), return
+the index just past its final #\\m; otherwise NIL. SGR is the one escape
+shape that only changes how subsequent text is rendered — it can't move
+the cursor, erase anything, or touch the screen — so it's safe to let
+through even though model output is otherwise untrusted."
+  (when (and (< (1+ start) (length string))
+             (char= (char string (1+ start)) #\[))
+    (loop for i from (+ start 2) below (length string)
+          for ch = (char string i)
+          do (cond
+               ((or (digit-char-p ch) (char= ch #\;)))
+               ((char= ch #\m) (return (1+ i)))
+               (t (return nil)))
+          finally (return nil))))
+
 (defun strip-terminal-control-chars (string)
   "Strip characters that could rewrite, erase, or visually spoof
-already-printed terminal output (see UNSAFE-TERMINAL-CHAR-P). Model output
-is untrusted and must not be allowed to manipulate the terminal it's
-printed to. Returns STRING unchanged (no copy) when nothing needs
+already-printed terminal output (see UNSAFE-TERMINAL-CHAR-P), while letting
+well-formed SGR color/attribute sequences through unharmed (see
+SGR-SEQUENCE-END) so legitimate coloring still works. Model output is
+otherwise untrusted and must not be allowed to manipulate the terminal
+it's printed to. Returns STRING unchanged (no copy) when nothing needs
 stripping, since that is the overwhelmingly common case on the streaming
 hot path."
   (if (find-if #'unsafe-terminal-char-p string)
-      (remove-if #'unsafe-terminal-char-p string)
+      (with-output-to-string (out)
+        (loop with len = (length string)
+              with i = 0
+              while (< i len)
+              do (let ((sgr-end (and (char= (char string i) #\Escape)
+                                      (sgr-sequence-end string i))))
+                   (cond
+                     (sgr-end
+                      (write-string string out :start i :end sgr-end)
+                      (setf i sgr-end))
+                     ((unsafe-terminal-char-p (char string i))
+                      (incf i))
+                     (t
+                      (write-char (char string i) out)
+                      (incf i))))))
       string))
 
 (defun make-stream-printer ()
