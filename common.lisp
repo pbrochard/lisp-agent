@@ -131,22 +131,25 @@
 
 ;; Run prompt
 (defun run-prompt ()
-  (print-prompt (get-prompt))
-  (run (get-prompt)))
+  (let ((prompt (get-prompt)))
+	(print-prompt prompt)
+	(run prompt)))
 
 (defalias rp run-prompt)
 
 ;; Edit and run prompt
 (defun edit-run-prompt ()
   (edit-prompt)
-  (run (get-prompt)))
+  (let ((prompt (get-prompt)))
+	(run prompt)))
 
 (defalias p edit-run-prompt)
 
 ;; Edit and run new prompt
 (defun edit-run-new-prompt ()
   (edit-new-prompt)
-  (run (get-prompt)))
+  (let ((prompt (get-prompt)))
+	(run prompt)))
 
 (defalias np edit-run-new-prompt)
 (defalias r edit-run-new-prompt)
