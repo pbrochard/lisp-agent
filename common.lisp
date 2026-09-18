@@ -1,7 +1,7 @@
 (defpackage :common
   (:use :cl :utils :cl-ansi-text :uiop)
   (:export #:SYSTEM-PROMPT #:*CURRENT-RUN-FN* #:*current-model* #:*MEMORY-FILE* #:*SYSTEM-MESSAGE* #:SEP #:GREY #:RECALL
-		   #:REMEMBER #:FORGET-MEM #:BASH #:CD #:SET-STATUS #:STATUS-THINKING #:STATUS-OK
+		   #:REMEMBER #:FORGET-MEM #:FORGET-ALL #:BASH #:CD #:SET-STATUS #:STATUS-THINKING #:STATUS-OK
 		   #:GET-PROMPT #:EP #:RP #:P #:ENP #:NP #:R)
   (:nicknames :c :co))
 
@@ -53,20 +53,22 @@
   (when (probe-file *memory-file*) (delete-file *memory-file*))
   (format t "~&Memory wiped: ~a.~%~a~%" *memory-file* SEP))
 
+;; Package names, not literal SYMBOL-QUALIFIED::NAMES: common.lisp loads
+;; before any agent package exists, so the reader would choke on a
+;; package-qualified symbol at load time. FIND-PACKAGE/FIND-SYMBOL resolve
+;; by name at call time instead, once everything is actually loaded.
+(defparameter *agent-packages* '("AGENT-CLAUDE" "AGENT-GEMINI" "AGENT-OLLAMA" "AGENT-CLAUDECODE"))
+
 (defun forget-all ()
-  "Finds all /agent/data/memory-*.json files and deletes them from the filesystem."
-  (let ((directory "/agent/data/")
-        (pattern "memory-")
-        (extension ".json"))
-    ;; Find all files matching the pattern
-    (let ((files (directory (merge-pathnames (format nil "~a~a*~a" directory pattern extension) directory))))
-      (if (null files)
-          (format t "No matching memory files found.~%")
-          (progn
-            (dolist (file files)
-              (delete-file file)
-              (format t "Deleted: ~a~%" file))
-			(format t "Successfully deleted ~a file(s).~%" (length files)))))))
+  "Calls FORGET in every agent package instead of duplicating each one's own
+cleanup by deleting /agent/data/memory-*.json files directly: that missed
+whatever extra state a given agent also needs to clear, e.g.
+agent-claudecode's own session file alongside its memory."
+  (dolist (package-name *agent-packages*)
+    (let* ((package (find-package package-name))
+           (fn (and package (find-symbol "FORGET" package))))
+      (when (and fn (fboundp fn))
+        (funcall fn)))))
 
 ;;; Shell helper
 (defun bash ()
