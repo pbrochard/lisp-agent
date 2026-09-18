@@ -153,7 +153,12 @@ unconditional insert, since always inserting one (the previous approach)
 double-spaced whenever the model's own text already supplied the gap, and
 inserting only once ever under-spaced every later transition."
   (let ((trailing-newlines 2) ; RUN's own preamble already ends on a blank line
-        (pending-bracket ""))
+        (pending-bracket "")
+        ;; Task tool_use id -> subagent name (its "description", falling back
+        ;; to "subagent_type"), learned from the top-level assistant's own
+        ;; tool_use blocks so subagent output can be tagged with which
+        ;; subagent it came from instead of a generic "[subagent]" label.
+        (subagent-names (make-hash-table :test #'equal)))
     (labels ((track! (str)
                (loop for ch across str
                      do (setf trailing-newlines (if (char= ch #\Newline) (min 2 (1+ trailing-newlines)) 0))))
@@ -203,17 +208,17 @@ ends right there -- emit it as literal, unfixed text rather than losing it."
                (unless (zerop (length pending-bracket))
                  (write-string pending-bracket)
                  (setf pending-bracket "")))
-             (print-subagent-block (label block)
+             (print-subagent-block (content-key subagent-name block)
                "A --forward-subagent-text block arrives as a single
 complete string (not incremental deltas like the main agent's own
 content), so there's no chunk-boundary/SGR-buffering concern here -- just
-sanitize and print it as one unit, tagged so it's visually distinct from
-the main agent's own narration."
-               (let ((clean (strip-terminal-control-chars (gethash label block))))
+sanitize and print it as one unit, tagged with which subagent it came
+from so it's visually distinct from the main agent's own narration."
+               (let ((clean (strip-terminal-control-chars (gethash content-key block))))
                  (unless (zerop (length clean))
                    (flush-pending!)
                    (ensure-blank-line)
-                   (let ((line (format nil "  ⤷ [subagent] ~a~%" clean)))
+                   (let ((line (format nil "  ⤷ [~a] ~a~%" subagent-name clean)))
                      (write-string (grey line))
                      (track! line))
                    (finish-output)))))
@@ -255,17 +260,32 @@ the main agent's own narration."
             ;; subagent-heavy turns totally silent. shasht parses JSON null
             ;; as the truthy keyword :NULL, not NIL -- without excluding it
             ;; explicitly, the top-level's own messages (which carry an
-            ;; explicit "parent_tool_use_id":null) would wrongly match too.
-            ((and (member event-type '("assistant" "user") :test #'equal)
-                  (let ((parent (gethash "parent_tool_use_id" event)))
-                    (and parent (not (eq parent :null)))))
+            ;; explicit "parent_tool_use_id":null) would wrongly match the
+            ;; forwarding branch below; instead they're where a Task
+            ;; tool_use's id gets learned so later forwarded blocks can be
+            ;; tagged with the subagent's own name/type instead of a bare
+            ;; "[subagent]" label.
+            ((member event-type '("assistant" "user") :test #'equal)
              (sb-thread:with-mutex (*output-lock*)
-               (loop for block across (or (gethash "content" (gethash "message" event)) #())
-                     do (cond
-                          ((equal (gethash "type" block) "text")
-                           (print-subagent-block "text" block))
-                          ((equal (gethash "type" block) "thinking")
-                           (print-subagent-block "thinking" block))))))))))))
+               (let ((parent (gethash "parent_tool_use_id" event))
+                     (blocks (or (gethash "content" (gethash "message" event)) #())))
+                 (if (and parent (not (eq parent :null)))
+                     (let ((subagent-name (or (gethash parent subagent-names) "subagent")))
+                       (loop for block across blocks
+                             do (cond
+                                  ((equal (gethash "type" block) "text")
+                                   (print-subagent-block "text" subagent-name block))
+                                  ((equal (gethash "type" block) "thinking")
+                                   (print-subagent-block "thinking" subagent-name block)))))
+                     (loop for block across blocks
+                           when (and (equal (gethash "type" block) "tool_use")
+                                     (equal (gethash "name" block) "Task"))
+                             do (let* ((input (gethash "input" block))
+                                       (subagent-name (or (gethash "description" input)
+                                                           (gethash "subagent_type" input))))
+                                  (when subagent-name
+                                    (setf (gethash (gethash "id" block) subagent-names)
+                                          subagent-name))))))))))))))
 
 (defun drain-stderr (process)
   "Forward the child process's stderr to *error-output*, sanitizing each
