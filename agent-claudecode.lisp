@@ -28,7 +28,7 @@
 (in-package :agent-claudecode)
 
 (defparameter *claude-bin* "claude")
-(defparameter *model* "sonnet")
+(defparameter *model* "opus")
 (defparameter *permission-mode* "bypassPermissions")
 
 ;;; Unlike agent-gemini/agent-claude, the CLI has no models endpoint to query
