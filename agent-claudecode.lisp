@@ -168,20 +168,23 @@ inserting only once ever under-spaced every later transition."
               (cond
                 ((and (equal inner-type "content_block_start")
                       (equal (gethash "type" (gethash "content_block" inner)) "text"))
-                 (ensure-blank-line))
+                 (ensure-blank-line)
+                 (finish-output))
                 ((equal inner-type "content_block_delta")
                  (let* ((delta (gethash "delta" inner))
-                        (delta-type (gethash "type" delta)))
-                   (cond
-                     ((equal delta-type "thinking_delta")
-                      (let ((clean (strip-terminal-control-chars (gethash "thinking" delta))))
-                        (write-string (grey clean))
-                        (track! clean)))
-                     ((equal delta-type "text_delta")
-                      (let ((clean (strip-terminal-control-chars (gethash "text" delta))))
-                        (write-string clean)
-                        (track! clean)))))))
-              (finish-output))))))))
+                        (delta-type (gethash "type" delta))
+                        (clean (cond
+                                 ((equal delta-type "thinking_delta")
+                                  (strip-terminal-control-chars (gethash "thinking" delta)))
+                                 ((equal delta-type "text_delta")
+                                  (strip-terminal-control-chars (gethash "text" delta))))))
+                   ;; Many thinking_delta chunks arrive genuinely empty; skip
+                   ;; the write+flush entirely rather than doing a no-op
+                   ;; syscall for invisible content on every single one.
+                   (when (and clean (plusp (length clean)))
+                     (write-string (if (equal delta-type "thinking_delta") (grey clean) clean))
+                     (track! clean)
+                     (finish-output))))))))))))
 
 (defun drain-stderr (process)
   "Forward the child process's stderr to *error-output*, sanitizing each
