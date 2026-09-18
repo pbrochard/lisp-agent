@@ -213,14 +213,21 @@ ends right there -- emit it as literal, unfixed text rather than losing it."
 complete string (not incremental deltas like the main agent's own
 content), so there's no chunk-boundary/SGR-buffering concern here -- just
 sanitize and print it as one unit, tagged with which subagent it came
-from so it's visually distinct from the main agent's own narration."
+from so it's visually distinct from the main agent's own narration. The
+GREY-wrapped span deliberately excludes the trailing newline -- when it
+was included, the SGR start code and its reset ended up either side of
+a \\n inside one write, and rlwrap (which agent-run.sh pipes the REPL
+through for readline editing) mishandles color resets that land past a
+line boundary like that, so the line rendered in the terminal's default
+white instead of grey."
                (let ((clean (strip-terminal-control-chars (gethash content-key block))))
                  (unless (zerop (length clean))
                    (flush-pending!)
                    (ensure-blank-line)
-                   (let ((line (format nil "  ⤷ [~a] ~a~%" subagent-name clean)))
+                   (let ((line (format nil "  ⤷ [~a] ~a" subagent-name clean)))
                      (write-string (grey line))
-                     (track! line))
+                     (write-char #\Newline)
+                     (track! (concatenate 'string line (string #\Newline))))
                    (finish-output)))))
       (lambda (event)
         (let ((event-type (gethash "type" event)))
