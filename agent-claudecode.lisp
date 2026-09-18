@@ -202,6 +202,22 @@ early, unfixed."
                                 (progn
                                   (write-char (char full i) out)
                                   (incf i)))))))
+             (grey-across-newlines (string)
+               "Like GREY, but safe for a chunk that may itself contain an
+embedded newline (thinking_delta chunks routinely do, e.g. at a paragraph
+break) -- wrapping such a chunk in one GREY call would put the SGR reset
+after that newline, which rlwrap renders in the terminal's default color
+instead of grey, the same failure PRINT-SUBAGENT-BLOCK's grey span already
+works around by keeping start/reset on the same side of every newline."
+               (let ((start 0) (len (length string)))
+                 (with-output-to-string (out)
+                   (loop
+                     (let ((nl (position #\Newline string :start start)))
+                       (write-string (grey (subseq string start (or nl len))) out)
+                       (unless nl (return))
+                       (write-char #\Newline out)
+                       (setf start (1+ nl))
+                       (when (>= start len) (return)))))))
              (flush-pending! ()
                "A held-back PENDING-BRACKET never completes if the block
 ends right there -- emit it as literal, unfixed text rather than losing it."
@@ -258,7 +274,7 @@ white instead of grey."
                       ;; the write+flush entirely rather than doing a no-op
                       ;; syscall for invisible content on every single one.
                       (when (and clean (plusp (length clean)))
-                        (write-string (if (equal delta-type "thinking_delta") (grey clean) clean))
+                        (write-string (if (equal delta-type "thinking_delta") (grey-across-newlines clean) clean))
                         (track! clean)
                         (finish-output))))))))
             ;; --forward-subagent-text relays a subagent's own text/thinking
