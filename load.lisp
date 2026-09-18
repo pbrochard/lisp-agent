@@ -8,4 +8,4 @@
 (load "agent-claudecode.lisp")
 (load "agent-ollama.lisp")
 
-(agent:use)
+(claudecode:use)
