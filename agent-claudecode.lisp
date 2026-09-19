@@ -14,6 +14,12 @@
 ;;;; tool the CLI runs, with its arguments, and a preview of what came back --
 ;;;; printed in grey alongside the usual thinking/answer stream.
 ;;;;
+;;;; Tool history: every tool the CLI runs -- with its arguments and a
+;;;; preview of its result -- is written to /agent/data/claudecode-tools.md
+;;;; as the turn happens, whether or not the verbose trace is on. The file is
+;;;; emptied at the start of each (run ...), so it always describes the
+;;;; current turn.
+;;;;
 ;;;; Memory: Claude Code keeps its own session transcript on disk. We only
 ;;;; remember the session id between runs so --resume picks the same
 ;;;; conversation back up; a copy of the exchange is also appended to
@@ -77,8 +83,16 @@
 ;;; complaining. Read it once, on first use: it costs ~50ms.
 (defparameter *timezone-repository-loaded* nil)
 
+(defun find-timezone (name)
+  "The local-time timezone object for IANA NAME, or NIL if there is no such zone."
+  (unless *timezone-repository-loaded*
+    (local-time:reread-timezone-repository)
+    (setf *timezone-repository-loaded* t))
+  (ignore-errors (local-time:find-timezone-by-location-name name)))
+
 (defconstant MEMORY-FILE "/agent/data/memory-claudecode.json")
 (defconstant SESSION-FILE "/agent/data/session-claudecode.txt")
+(defconstant TOOLS-FILE "/agent/data/claudecode-tools.md")
 
 ;;; --- session id persistence ---------------------------------------------
 ;;; The CLI already remembers the full transcript per session; all we need
@@ -238,17 +252,24 @@ alphabetically."
                   (rank-b nil)
                   (t (string< a b)))))))
 
+(defun format-tool-args (input width)
+  "A tool_use's arguments as key=\"value\" pairs on one line, each value cut
+off at WIDTH. Separate from FORMAT-TOOL-USE because the terminal trace and
+the tool history file render the same arguments at different widths -- a
+line has a terminal to fit in, a file does not."
+  (if (hash-table-p input)
+      (format nil "~{~a~}"
+              (loop for key in (tool-input-keys input)
+                    collect (format nil "  ~a=\"~a\"" key
+                                    (one-line (render-value (gethash key input)) width))))
+      ""))
+
 (defun format-tool-use (block)
   "One line describing a tool_use BLOCK: the tool's name, then its arguments
 as key=\"value\" pairs."
-  (let ((input (gethash "input" block)))
-    (format nil "~a~{~a~}"
-            (gethash "name" block)
-            (when (hash-table-p input)
-              (loop for key in (tool-input-keys input)
-                    collect (format nil "  ~a=\"~a\"" key
-                                    (one-line (render-value (gethash key input))
-                                              *verbose-value-width*)))))))
+  (format nil "~a~a"
+          (gethash "name" block)
+          (format-tool-args (gethash "input" block) *verbose-value-width*)))
 
 (defun tool-result-text (block)
   "The text a tool_result BLOCK carries. Its \"content\" is a plain string
@@ -270,6 +291,72 @@ shown on a line."
   "True for a JSON true, which shasht parses as the keyword :TRUE rather than
 as T."
   (and (member value '(:true t)) t))
+
+;;; --- tool history ---------------------------------------------------------
+;;; Every tool the CLI runs is also written down, as it happens, in a markdown
+;;; file: what the terminal trace shows scrolls past and is gone, and with
+;;; *VERBOSE* off it was never shown at all, so there was no way afterwards to
+;;; ask what a turn actually did. Recorded independently of *VERBOSE* -- that
+;;; flag decides what gets printed, not what gets kept -- and truncated at the
+;;; start of every RUN, since this is a record of the turn in progress rather
+;;; than a log that grows without bound.
+
+(defparameter *tool-history-value-width* 2000
+  "How much of a tool argument the history file keeps. Far wider than
+*VERBOSE-VALUE-WIDTH*: that one has a terminal line to fit inside, whereas
+here the point is to be able to read back the command that actually ran.
+Still bounded, so a Write of a large file can't run away with the file.")
+
+(defparameter *tool-history-result-width* 2000
+  "How much of a tool's output the history file keeps. Same reasoning as
+*TOOL-HISTORY-VALUE-WIDTH*.")
+
+(defun tool-history-time (&optional (format '((:hour 2) #\: (:min 2) #\: (:sec 2))))
+  "Now, rendered in *TIMEZONE* like the usage report's reset times, so a
+history entry can be lined up against what was on screen."
+  (local-time:format-timestring
+   nil (local-time:now) :format format
+   :timezone (or (find-timezone *timezone*) local-time:+utc-zone+)))
+
+(defun append-tool-history (line)
+  "Append LINE to TOOLS-FILE. Failures are swallowed on purpose: the history
+is a side record, and an unwritable /agent/data should not take down the
+turn that is busy producing the output the user actually asked for."
+  (ignore-errors
+    (with-open-file (out TOOLS-FILE :direction :output
+                                    :if-exists :append
+                                    :if-does-not-exist :create)
+      (write-line line out))))
+
+(defun reset-tool-history ()
+  "Truncate TOOLS-FILE back to just its heading, so a run's history holds
+that run's tools and nothing from the one before."
+  (ignore-errors
+    (with-open-file (out TOOLS-FILE :direction :output
+                                    :if-exists :supersede
+                                    :if-does-not-exist :create)
+      (format out "# Claude Code tool history~%~%Run started ~a.~%~%"
+              (tool-history-time '((:year 4) #\- (:month 2) #\- (:day 2) #\Space
+                                   (:hour 2) #\: (:min 2) #\: (:sec 2) #\Space :timezone))))))
+
+(defun record-tool-use (subagent-name block)
+  "Write a tool call down as a markdown list item: when it happened, which
+subagent asked for it (if any), the tool, and what it was handed."
+  (append-tool-history
+   (format nil "- `~a` ~@[*~a* ~]**~a**~a"
+           (tool-history-time) subagent-name (gethash "name" block)
+           (format-tool-args (gethash "input" block) *tool-history-value-width*))))
+
+(defun record-tool-result (subagent-name tool-name block)
+  "Write what a tool answered down as a sub-item of the call it answers.
+Nesting is by position: results arrive after their call, and parallel calls
+interleave, hence the tool name repeated on the result line too."
+  (let ((text (one-line (tool-result-text block) *tool-history-result-width*)))
+    (append-tool-history
+     (format nil "  - `~a` ~@[*~a* ~]~a~:[~; failed~]: ~a"
+             (tool-history-time) subagent-name tool-name
+             (json-true-p (gethash "is_error" block))
+             (if (zerop (length text)) "(no output)" text)))))
 
 (defun make-stream-printer ()
   "Return a fresh ON-EVENT callback for CALL-CLAUDE that renders a
@@ -403,22 +490,28 @@ PRINT-SUBAGENT-BLOCK documents."
                (setf last-line-was-trace t)
                (finish-output))
              (print-tool-use (subagent-name block)
-               "Echo a tool call: which tool, and what it was handed. Also
-records the call's id so PRINT-TOOL-RESULT can name the tool its result
-belongs to."
+               "Record a tool call in the tool history and, when *VERBOSE* is
+on, echo it: which tool, and what it was handed. Also records the call's id
+so PRINT-TOOL-RESULT can name the tool its result belongs to. The history is
+written either way -- *VERBOSE* governs the terminal, not the file."
                (setf (gethash (gethash "id" block) tool-names) (gethash "name" block))
-               (print-trace-line (format nil "  ⚒ ~@[[~a] ~]~a"
-                                         subagent-name (format-tool-use block))))
+               (record-tool-use subagent-name block)
+               (when *verbose*
+                 (print-trace-line (format nil "  ⚒ ~@[[~a] ~]~a"
+                                           subagent-name (format-tool-use block)))))
              (print-tool-result (subagent-name block)
-               "Echo what a tool answered, under the name of the tool that was
-called -- a tool_result block itself only carries the tool_use id."
-               (let ((text (one-line (tool-result-text block) *verbose-result-width*)))
-                 (print-trace-line
-                  (format nil "  ⤶ ~@[[~a] ~]~a~:[~; failed~]: ~a"
-                          subagent-name
-                          (or (gethash (gethash "tool_use_id" block) tool-names) "tool")
-                          (json-true-p (gethash "is_error" block))
-                          (if (zerop (length text)) "(no output)" text)))))
+               "Record what a tool answered, and when *VERBOSE* is on echo it
+too, under the name of the tool that was called -- a tool_result block itself
+only carries the tool_use id."
+               (let ((tool-name (or (gethash (gethash "tool_use_id" block) tool-names) "tool")))
+                 (record-tool-result subagent-name tool-name block)
+                 (when *verbose*
+                   (let ((text (one-line (tool-result-text block) *verbose-result-width*)))
+                     (print-trace-line
+                      (format nil "  ⤶ ~@[[~a] ~]~a~:[~; failed~]: ~a"
+                              subagent-name tool-name
+                              (json-true-p (gethash "is_error" block))
+                              (if (zerop (length text)) "(no output)" text)))))))
              (remember-subagent-name (block)
                "Learn a subagent-spawning tool_use's id -> name mapping, so
 --forward-subagent-text blocks tagged with that id can be labelled with the
@@ -508,8 +601,8 @@ changes back."
                              (print-subagent-block block-type subagent-name block))
                             ((equal block-type "tool_use")
                              (remember-subagent-name block)
-                             (when *verbose* (print-tool-use subagent-name block)))
-                            ((and *verbose* (equal block-type "tool_result"))
+                             (print-tool-use subagent-name block))
+                            ((equal block-type "tool_result")
                              (print-tool-result subagent-name block)))))))))))))
 
 (defun drain-stderr (process)
@@ -576,13 +669,6 @@ Returns (values answer-text session-id total-cost-usd rate-limit-info usage)."
 ;;; Rendered just above the separator so every reply shows where the
 ;;; account stands on the rolling 5h/7d rate-limit windows and what the
 ;;; call cost, in dollars.
-
-(defun find-timezone (name)
-  "The local-time timezone object for IANA NAME, or NIL if there is no such zone."
-  (unless *timezone-repository-loaded*
-    (local-time:reread-timezone-repository)
-    (setf *timezone-repository-loaded* t))
-  (ignore-errors (local-time:find-timezone-by-location-name name)))
 
 (defun format-reset-time (epoch-seconds)
   "Reset instant rendered in *TIMEZONE*, e.g. \"2026-09-23 03:59 CEST\".
@@ -666,6 +752,7 @@ has happened this session, since /usage's own text has no such payload."
 (defun run (prompt)
   (use)
   (set-status STATUS-THINKING)
+  (reset-tool-history)
   (format t "~&______~&~%")
   (multiple-value-bind (text session-id cost rate-limit usage)
       (call-claude prompt (make-stream-printer))
