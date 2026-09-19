@@ -1,4 +1,4 @@
-(ql:quickload '(:dexador :shasht :cl-ansi-text) :silent t)
+(ql:quickload '(:dexador :shasht :cl-ansi-text :local-time) :silent t)
 
 (load "utils.lisp")
 (load "common.lisp")

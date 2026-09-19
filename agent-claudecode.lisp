@@ -22,7 +22,8 @@
 (defpackage :agent-claudecode
   (:use :cl :utils :common :cl-ansi-text)
   (:export #:run #:use #:forget #:set-model #:list-models #:lm #:*models*
-           #:set-effort #:list-efforts #:le #:*efforts* #:usage)
+           #:set-effort #:list-efforts #:le #:*efforts* #:usage
+           #:set-timezone #:*timezone*)
   (:nicknames :cc :claudecode :ccode))
 
 (in-package :agent-claudecode)
@@ -52,6 +53,17 @@
 ;;; --effort accepts a fixed set of levels; nil means "don't pass the flag"
 ;;; and let the CLI use its own default.
 (defparameter *efforts* (vector "low" "medium" "high" "xhigh" "max"))
+
+;;; Timezone the rate-limit reset times are rendered in. An IANA name, since
+;;; a fixed UTC offset would be wrong half the year anywhere that keeps DST.
+;;; Resolved against local-time's bundled zoneinfo, so no external process and
+;;; no dependency on the host having tzdata installed.
+(defparameter *timezone* "Europe/Paris")
+
+;;; local-time loads its zone repository lazily, and until it has,
+;;; FIND-TIMEZONE-BY-LOCATION-NAME just answers NIL for every name rather than
+;;; complaining. Read it once, on first use: it costs ~50ms.
+(defparameter *timezone-repository-loaded* nil)
 
 (defconstant MEMORY-FILE "/agent/data/memory-claudecode.json")
 (defconstant SESSION-FILE "/agent/data/session-claudecode.txt")
@@ -379,11 +391,21 @@ Returns (values answer-text session-id total-cost-usd rate-limit-info usage)."
 ;;; account stands on the rolling 5h/7d rate-limit windows and what the
 ;;; call cost, in dollars.
 
+(defun find-timezone (name)
+  "The local-time timezone object for IANA NAME, or NIL if there is no such zone."
+  (unless *timezone-repository-loaded*
+    (local-time:reread-timezone-repository)
+    (setf *timezone-repository-loaded* t))
+  (ignore-errors (local-time:find-timezone-by-location-name name)))
+
 (defun format-reset-time (epoch-seconds)
-  (multiple-value-bind (sec min hour date month year)
-      (decode-universal-time (+ epoch-seconds +UNIX-EPOCH-UNIVERSAL-TIME+) 0)
-    (declare (ignore sec))
-    (format nil "~4,'0d-~2,'0d-~2,'0d ~2,'0d:~2,'0d UTC" year month date hour min)))
+  "Reset instant rendered in *TIMEZONE*, e.g. \"2026-09-23 03:59 CEST\".
+Falls back to UTC when *TIMEZONE* names no known zone."
+  (local-time:format-timestring
+   nil (local-time:unix-to-timestamp epoch-seconds)
+   :format '((:year 4) #\- (:month 2) #\- (:day 2) #\Space
+             (:hour 2) #\: (:min 2) #\Space :timezone)
+   :timezone (or (find-timezone *timezone*) local-time:+utc-zone+)))
 
 (defun format-remaining (epoch-seconds)
   "Human-readable countdown from now until EPOCH-SECONDS, e.g. \"2d 3h\" or
@@ -509,3 +531,13 @@ has happened this session, since /usage's own text has no such payload."
   (setf *effort* (aref *efforts* (- num 1)))
   (use)
   *effort*)
+
+(defun set-timezone (name)
+  "Set the timezone usage reset times are shown in, e.g.
+\(set-timezone \"Asia/Tokyo\"). Unknown names are rejected rather than stored,
+since rendering would silently fall back to UTC later on."
+  (if (find-timezone name)
+      (setf *timezone* name)
+      (progn
+        (format t "~&Unknown timezone: ~a (keeping ~a)~%" name *timezone*)
+        *timezone*)))
