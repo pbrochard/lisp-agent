@@ -70,7 +70,7 @@
 ;;; turn showing only the model's own prose. Off by default: on a long turn
 ;;; that is a lot of output, and it is meant for watching the work happen,
 ;;; not for normal reading. See SET-VERBOSE.
-(defparameter *verbose* nil)
+(defparameter *verbose* t)
 
 ;;; Timezone the rate-limit reset times are rendered in. An IANA name, since
 ;;; a fixed UTC offset would be wrong half the year anywhere that keeps DST.
