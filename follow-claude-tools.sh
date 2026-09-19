@@ -1,4 +1,4 @@
 #! /bin/sh
 
 clear
-tail -F claudecode-tools.md | batcat --paging=never --language=md --unbuffered --plain
+tail -F -n 200 claudecode-tools.md | batcat --paging=never --language=md --unbuffered --plain
