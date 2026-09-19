@@ -43,60 +43,54 @@
 (defparameter *model* "opus")
 (defparameter *permission-mode* "bypassPermissions")
 
-;;; Unlike agent-gemini/agent-claude, the CLI has no models endpoint to query
-;;; (it rides subscription auth, not an API key), so this is just the fixed
-;;; list of aliases --model accepts.
+;;; The CLI rides subscription auth and has no models endpoint to ask, so the
+;;; aliases --model accepts are hard-coded.
 (defparameter *models* (vector "sonnet" "opus" "fable" "haiku"))
 
 (defparameter *effort* nil)
-
-;;; stdout (main thread, streamed deltas) and stderr (its own thread, see
-;;; DRAIN-STDERR) both write to the same terminal. Without a shared lock
-;;; their writes can interleave mid-line whenever both fire around the same
-;;; time, which looks exactly like a long line getting garbled/truncated.
-(defparameter *output-lock* (sb-thread:make-mutex :name "claude-output"))
-
-;;; The rate_limit_info from the most recent real (non-local-command) call,
-;;; cached so USAGE can show an exact reset countdown even though /usage
-;;; itself is answered locally by the CLI and carries no rate-limit payload.
-(defparameter *last-rate-limit* nil)
-
-;;; --effort accepts a fixed set of levels; nil means "don't pass the flag"
-;;; and let the CLI use its own default.
 (defparameter *efforts* (vector "low" "medium" "high" "xhigh" "max"))
 
-;;; When on, every tool the CLI runs is echoed as it happens -- which tool,
-;;; with which arguments, and a preview of what it answered -- instead of the
-;;; turn showing only the model's own prose. Off by default: on a long turn
-;;; that is a lot of output, and it is meant for watching the work happen,
-;;; not for normal reading. See SET-VERBOSE.
-(defparameter *verbose* t)
+;;; stdout (streamed deltas, main thread) and stderr (DRAIN-STDERR, its own
+;;; thread) share one terminal; without this lock their writes interleave
+;;; mid-line and look like a garbled, truncated line.
+(defparameter *output-lock* (sb-thread:make-mutex :name "claude-output"))
 
-;;; Timezone the rate-limit reset times are rendered in. An IANA name, since
-;;; a fixed UTC offset would be wrong half the year anywhere that keeps DST.
-;;; Resolved against local-time's bundled zoneinfo, so no external process and
-;;; no dependency on the host having tzdata installed.
-(defparameter *timezone* "Europe/Paris")
+(defparameter *last-rate-limit* nil
+  "rate_limit_info from the last real call, kept because /usage is answered
+locally by the CLI and carries no rate-limit payload of its own.")
 
-;;; local-time loads its zone repository lazily, and until it has,
-;;; FIND-TIMEZONE-BY-LOCATION-NAME just answers NIL for every name rather than
-;;; complaining. Read it once, on first use: it costs ~50ms.
+(defparameter *verbose* t
+  "Whether every tool the CLI runs is echoed as it happens. See SET-VERBOSE.")
+
+(defparameter *timezone* "Europe/Paris"
+  "IANA zone the rate-limit reset times are rendered in, resolved against
+local-time's bundled zoneinfo. A fixed UTC offset would be wrong half the
+year anywhere that keeps DST.")
+
 (defparameter *timezone-repository-loaded* nil)
+
+(defun load-timezone-repository-once ()
+  "local-time answers NIL for every zone name until its repository is read,
+rather than complaining, so read it on first use -- it costs ~50ms."
+  (unless *timezone-repository-loaded*
+    (local-time:reread-timezone-repository)
+    (setf *timezone-repository-loaded* t)))
 
 (defun find-timezone (name)
   "The local-time timezone object for IANA NAME, or NIL if there is no such zone."
-  (unless *timezone-repository-loaded*
-    (local-time:reread-timezone-repository)
-    (setf *timezone-repository-loaded* t))
+  (load-timezone-repository-once)
   (ignore-errors (local-time:find-timezone-by-location-name name)))
+
+(defun display-timezone ()
+  (or (find-timezone *timezone*) local-time:+utc-zone+))
 
 (defconstant MEMORY-FILE "/agent/data/memory-claudecode.json")
 (defconstant SESSION-FILE "/agent/data/session-claudecode.txt")
 (defconstant TOOLS-FILE "/agent/data/claudecode-tools.md")
 
 ;;; --- session id persistence ---------------------------------------------
-;;; The CLI already remembers the full transcript per session; all we need
-;;; to survive a fresh process is which session id to --resume.
+;;; The CLI keeps the transcript itself; all we carry across processes is
+;;; which session id to --resume.
 
 (defun read-session-id ()
   (when (probe-file SESSION-FILE)
@@ -110,56 +104,63 @@
     (write-line id out)))
 
 ;;; --- talking to the model -------------------------------------------------
-;;; No HTTP here: the "call" is a subprocess in print mode, JSON in, JSON out.
-;;; We ask for stream-json (one JSON object per line) instead of a single
-;;; json blob because that is the only format on which the CLI reports
-;;; rate_limit_event lines alongside the final result line. --include-partial-
-;;; messages additionally breaks each message into content_block_delta events
-;;; (thinking_delta, text_delta, ...) so we can render them as they arrive
-;;; instead of only seeing the finished message.
+;;; The "call" is a subprocess in print mode, JSON in, JSON out.
 
 (defconstant +UNIX-EPOCH-UNIVERSAL-TIME+ (encode-universal-time 0 0 0 1 1 1970 0))
 
+(defun c0-control-but-newline-or-tab-p (code)
+  (and (< code 32) (not (member code '(9 10)))))
+
+(defun delete-char-p (code)
+  (= code 127))
+
+(defun c1-control-p (code)
+  "The 8-bit equivalents of the ESC-introduced CSI/OSC sequences some
+terminals honor."
+  (<= #x80 code #x9F))
+
+(defun bidi-formatting-char-p (code)
+  "Embeddings, overrides and isolates, which a terminal honoring bidi can be
+made to visually reorder displayed text with."
+  (or (<= #x202A code #x202E)
+      (<= #x2066 code #x2069)))
+
 (defun unsafe-terminal-char-p (ch)
-  "True for a character that could rewrite/erase already-printed terminal
-output or visually spoof it: C0 controls (backspace, carriage return, ESC,
-...), DEL, C1 controls (0x80-0x9F, the 8-bit equivalents of ESC-introduced
-CSI/OSC sequences some terminals honor), and Unicode bidi-override /
-directional-isolate formatting characters (U+202A-U+202E, U+2066-U+2069)
-that terminals honoring bidi can use to visually reorder displayed text.
-Newlines and tabs are left alone."
+  "True for a character that could rewrite, erase or visually spoof
+already-printed terminal output. Newlines and tabs are left alone."
   (let ((code (char-code ch)))
-    (or (= code 127)                                 ; DEL
-        (<= #x80 code #x9F)                          ; C1 controls
-        (<= #x202A code #x202E)                      ; bidi embeddings/overrides
-        (<= #x2066 code #x2069)                      ; bidi isolates
-        (and (< code 32) (not (member code '(9 10)))))))
+    (or (delete-char-p code)
+        (c1-control-p code)
+        (bidi-formatting-char-p code)
+        (c0-control-but-newline-or-tab-p code))))
+
+(defun sgr-parameters-end (string start)
+  "The index just past the #\\m closing the SGR parameters that begin at
+START (the #\\[), NIL when something else is there, or :INCOMPLETE when the
+string runs out while the sequence could still be well-formed."
+  (loop for i from (1+ start) below (length string)
+        for ch = (char string i)
+        do (cond
+             ((or (digit-char-p ch) (char= ch #\;)))
+             ((char= ch #\m) (return (1+ i)))
+             (t (return nil)))
+        finally (return :incomplete)))
 
 (defun sgr-sequence-end (string start)
-  "If a well-formed SGR (color/attribute) escape sequence ESC[<params>m
-starts at STRING's index START (which must be the ESC byte itself), return
-the index just past its final #\\m; otherwise NIL. SGR is the one escape
-shape that only changes how subsequent text is rendered — it can't move
-the cursor, erase anything, or touch the screen — so it's safe to let
-through even though model output is otherwise untrusted."
+  "The index just past a complete SGR sequence ESC[<params>m starting at
+START, or NIL. SGR is the one escape shape that only changes how later text
+is rendered -- it cannot move the cursor, erase anything or touch the screen
+-- so it is safe to let through even though model output is untrusted."
   (when (and (< (1+ start) (length string))
              (char= (char string (1+ start)) #\[))
-    (loop for i from (+ start 2) below (length string)
-          for ch = (char string i)
-          do (cond
-               ((or (digit-char-p ch) (char= ch #\;)))
-               ((char= ch #\m) (return (1+ i)))
-               (t (return nil)))
-          finally (return nil))))
+    (let ((end (sgr-parameters-end string (1+ start))))
+      (and (integerp end) end))))
 
 (defun strip-terminal-control-chars (string)
-  "Strip characters that could rewrite, erase, or visually spoof
-already-printed terminal output (see UNSAFE-TERMINAL-CHAR-P), while letting
-well-formed SGR color/attribute sequences through unharmed (see
-SGR-SEQUENCE-END) so legitimate coloring still works. Model output is
-otherwise untrusted and must not be allowed to manipulate the terminal
-it's printed to. Returns STRING unchanged (no copy) when nothing needs
-stripping, since that is the overwhelmingly common case on the streaming
+  "STRING with every UNSAFE-TERMINAL-CHAR-P character removed and every
+well-formed SGR colour sequence left intact. Model output is untrusted and
+must not be able to manipulate the terminal it is printed to. STRING itself
+is returned when nothing needs stripping -- the common case on the streaming
 hot path."
   (if (find-if #'unsafe-terminal-char-p string)
       (with-output-to-string (out)
@@ -180,55 +181,51 @@ hot path."
       string))
 
 ;;; --- the verbose tool trace ----------------------------------------------
-;;; The CLI announces each tool it runs as a tool_use content block, and what
-;;; the tool answered as a matching tool_result block in the following
-;;; message. Neither is shown at all unless *VERBOSE* is on, in which case
-;;; each becomes one grey line in the stream, in between the model's own
-;;; paragraphs.
+;;; Each tool the CLI runs arrives as a tool_use content block and what it
+;;; answered as a tool_result block in the message after; with *VERBOSE* on
+;;; each becomes one grey line between the model's own paragraphs.
 
 (defparameter *verbose-value-width* 160
-  "How much of a single tool argument is shown. A Write's entire file content
-or an Edit's replacement text would otherwise bury the very line that is
-supposed to summarize the call.")
+  "How much of a single tool argument the trace shows.")
 
 (defparameter *verbose-result-width* 160
-  "How much of a tool's output is shown. Same reasoning as
-*VERBOSE-VALUE-WIDTH*: a Read of a long file answers with the whole file.")
+  "How much of a tool's output the trace shows.")
 
 (defparameter *tool-input-key-order*
   '("command" "file_path" "pattern" "glob" "path" "url" "query" "prompt"
     "description" "subagent_type" "old_string" "new_string" "content")
-  "Argument names printed first, in this order, ahead of every other argument
-alphabetically. Hash table iteration order is unspecified in Common Lisp, so
-without a fixed order the same call could list its arguments differently from
-one run to the next, and the argument that actually identifies the call --
-which file, which command -- would not reliably come first.")
+  "Argument names printed first, in this order, the rest alphabetically after
+them. Hash table iteration order is unspecified in Common Lisp, so without a
+fixed order the same call would list its arguments differently from one run
+to the next.")
+
+(defun collapse-whitespace (string)
+  "STRING with every run of whitespace -- including the newlines of a
+multi-line command or of file content -- squeezed to a single space, and no
+leading or trailing space left."
+  (string-right-trim
+   " "
+   (with-output-to-string (out)
+     (loop with previous-space = t
+           for ch across string
+           for space = (member ch '(#\Space #\Tab #\Newline))
+           do (if space
+                  (unless previous-space (write-char #\Space out))
+                  (write-char ch out))
+              (setf previous-space (and space t))))))
+
+(defun truncate-with-ellipsis (string width)
+  (if (> (length string) width)
+      (concatenate 'string (subseq string 0 width) "…")
+      string))
 
 (defun one-line (string width)
-  "STRING as a single line of at most WIDTH characters: terminal control
-characters stripped first (tool arguments and results are model/tool output,
-every bit as untrusted as the model's own text), runs of whitespace --
-including the newlines of a multi-line shell command or of file content --
-collapsed to a single space, and whatever is left cut off with an ellipsis.
-Staying on one line is what keeps a tool argument from swamping the trace,
-and it also sidesteps the grey-across-newlines problem PRINT-SUBAGENT-BLOCK
-documents, since there is never a newline inside the coloured span."
-  (let ((flat (string-right-trim
-               " "
-               (with-output-to-string (out)
-                 ;; Starting out already "inside" whitespace also drops any
-                 ;; leading blank lines, which heredocs and file contents
-                 ;; routinely carry.
-                 (loop with previous-space = t
-                       for ch across (strip-terminal-control-chars string)
-                       for space = (member ch '(#\Space #\Tab #\Newline))
-                       do (if space
-                              (unless previous-space (write-char #\Space out))
-                              (write-char ch out))
-                          (setf previous-space (and space t)))))))
-    (if (> (length flat) width)
-        (concatenate 'string (subseq flat 0 width) "…")
-        flat)))
+  "STRING sanitized, flattened onto one line and cut to WIDTH. Staying on one
+line keeps a tool argument from swamping the trace, and keeps every coloured
+span free of the newline that GREY-MULTILINE exists to work around."
+  (truncate-with-ellipsis
+   (collapse-whitespace (strip-terminal-control-chars string))
+   width))
 
 (defun render-value (value)
   "A tool argument rendered as text: strings as they stand, anything else
@@ -253,9 +250,9 @@ alphabetically."
                   (t (string< a b)))))))
 
 (defun tool-arg-strings (input width)
-  "A tool_use's arguments as a list of key=\"value\" strings, each flattened
-onto one line and cut off at WIDTH. This is the terminal trace's rendering;
-the history file keeps the lines a value actually has, see TOOL-ARG-LINES."
+  "A tool_use's arguments as a list of key=\"value\" strings for the terminal
+trace, each flattened onto one line and cut off at WIDTH. The history file
+keeps the lines a value really has instead, see TOOL-VALUE-LINES."
   (when (hash-table-p input)
     (loop for key in (tool-input-keys input)
           collect (format nil "~a=\"~a\"" key
@@ -269,10 +266,9 @@ as key=\"value\" pairs."
           (tool-arg-strings (gethash "input" block) *verbose-value-width*)))
 
 (defun tool-result-text (block)
-  "The text a tool_result BLOCK carries. Its \"content\" is a plain string
-for most tools, but an array of content blocks when a tool answers in several
-parts (text alongside an image, say), of which only the text parts can be
-shown on a line."
+  "The text a tool_result BLOCK carries: its \"content\" is a plain string for
+most tools, and an array of content blocks when a tool answers in several
+parts (text alongside an image, say), of which only the text can be shown."
   (let ((content (gethash "content" block)))
     (cond
       ((stringp content) content)
@@ -285,69 +281,63 @@ shown on a line."
       (t ""))))
 
 (defun json-true-p (value)
-  "True for a JSON true, which shasht parses as the keyword :TRUE rather than
-as T."
+  "True for a JSON true, which shasht parses as :TRUE rather than as T."
   (and (member value '(:true t)) t))
 
 ;;; --- tool history ---------------------------------------------------------
-;;; Every tool the CLI runs is also written down, as it happens, in a markdown
-;;; file: what the terminal trace shows scrolls past and is gone, and with
-;;; *VERBOSE* off it was never shown at all, so there was no way afterwards to
-;;; ask what a turn actually did. Recorded independently of *VERBOSE* -- that
-;;; flag decides what gets printed, not what gets kept -- and truncated at the
-;;; start of every RUN, since this is a record of the turn in progress rather
-;;; than a log that grows without bound.
+;;; The trace scrolls past and, with *VERBOSE* off, is never shown at all, so
+;;; every tool is written down in a markdown file as the turn happens. The
+;;; file is truncated by RESET-TOOL-HISTORY at the start of each RUN.
 
 (defparameter *tool-history-value-width* 2000
   "How much of a tool argument the history file keeps. Far wider than
-*VERBOSE-VALUE-WIDTH*: that one has a terminal line to fit inside, whereas
-here the point is to be able to read back the command that actually ran.
-Still bounded, so a Write of a large file can't run away with the file.")
+*VERBOSE-VALUE-WIDTH*, which has a terminal line to fit inside, but still
+bounded so a Write of a large file cannot run away with the file.")
 
 (defparameter *tool-history-result-width* 2000
-  "How much of a tool's output the history file keeps. Same reasoning as
-*TOOL-HISTORY-VALUE-WIDTH*.")
-
-(defun tool-history-time (&optional (format '((:hour 2) #\: (:min 2) #\: (:sec 2))))
-  "Now, rendered in *TIMEZONE* like the usage report's reset times, so a
-history entry can be lined up against what was on screen."
-  (local-time:format-timestring
-   nil (local-time:now) :format format
-   :timezone (or (find-timezone *timezone*) local-time:+utc-zone+)))
-
-(defun append-tool-history (entry)
-  "Append ENTRY to TOOLS-FILE, followed by the blank line that keeps it
-separate from the next one. Failures are swallowed on purpose: the history
-is a side record, and an unwritable /agent/data should not take down the
-turn that is busy producing the output the user actually asked for."
-  (ignore-errors
-    (with-open-file (out TOOLS-FILE :direction :output
-                                    :if-exists :append
-                                    :if-does-not-exist :create)
-      (format out "~a~%~%" entry))))
-
-(defun reset-tool-history ()
-  "Truncate TOOLS-FILE back to just its heading, so a run's history holds
-that run's tools and nothing from the one before."
-  (ignore-errors
-    (with-open-file (out TOOLS-FILE :direction :output
-                                    :if-exists :supersede
-                                    :if-does-not-exist :create)
-      (format out "# Claude Code tool history~%~%Run started ~a.~%~%"
-              (tool-history-time '((:year 4) #\- (:month 2) #\- (:day 2) #\Space
-                                   (:hour 2) #\: (:min 2) #\: (:sec 2) #\Space :timezone))))))
+  "How much of a tool's output the history file keeps.")
 
 (defparameter *tool-history-max-lines* 60
-  "How many lines of a single command or result the history keeps. The point
-of the file is to be able to read back what a turn did, and a Read of a long
-file or a chatty test run would otherwise bury that under thousands of lines
-of someone else's output.")
+  "How many lines of a single command or result the history keeps, so a Read
+of a long file cannot bury the turn it is meant to describe.")
+
+(defparameter +clock-format+ '((:hour 2) #\: (:min 2) #\: (:sec 2)))
+
+(defparameter +date-and-clock-format+
+  '((:year 4) #\- (:month 2) #\- (:day 2) #\Space
+    (:hour 2) #\: (:min 2) #\: (:sec 2) #\Space :timezone))
+
+(defun tool-history-time (&optional (format +clock-format+))
+  "Now, in *TIMEZONE*, so a history entry lines up with what was on screen."
+  (local-time:format-timestring nil (local-time:now)
+                                :format format
+                                :timezone (display-timezone)))
+
+(defmacro with-tool-history ((stream &key (if-exists :append)) &body body)
+  "Run BODY with STREAM open on TOOLS-FILE. Failures are swallowed on
+purpose: the history is a side record, and an unwritable /agent/data must not
+take down the turn that is producing the output actually asked for."
+  `(ignore-errors
+     (with-open-file (,stream TOOLS-FILE :direction :output
+                                         :if-exists ,if-exists
+                                         :if-does-not-exist :create)
+       ,@body)))
+
+(defun append-tool-history (entry)
+  "Append ENTRY, followed by the blank line separating it from the next one."
+  (with-tool-history (out)
+    (format out "~a~%~%" entry)))
+
+(defun reset-tool-history ()
+  "Truncate the history back to its heading, so a run's file holds that run's
+tools and nothing from the one before."
+  (with-tool-history (out :if-exists :supersede)
+    (format out "# Claude Code tool history~%~%Run started ~a.~%~%"
+            (tool-history-time +date-and-clock-format+))))
 
 (defun split-lines (string)
-  "STRING's lines, each right-trimmed of trailing whitespace, with leading and
-trailing blank lines dropped -- tool output routinely arrives wrapped in
-them, and in the history they would only push the next entry away from its
-headline."
+  "STRING's lines, each right-trimmed, with leading and trailing blank lines
+dropped -- tool output routinely arrives wrapped in them."
   (let ((lines (loop with start = 0
                      for newline = (position #\Newline string :start start)
                      collect (string-right-trim '(#\Space #\Tab #\Return)
@@ -360,14 +350,14 @@ headline."
           do (setf lines (butlast lines)))
     lines))
 
+(defun lines-omitted-note (count)
+  (format nil "… (~a more line~:p)" count))
+
 (defun history-lines (string width &optional (max-lines *tool-history-max-lines*))
-  "STRING as the body lines of a history entry: kept as the several lines it
-really has, since a shell heredoc or a directory listing rolled into one line
-is exactly the output nobody can read. Bounded all the same -- at most
-MAX-LINES lines and WIDTH characters across them all -- because a tool can
-answer with a whole file. What gets cut is announced on a line of its own
-rather than vanishing, so the file never quietly misrepresents what a tool
-said."
+  "STRING as the body lines of a history entry, keeping the lines it really
+has -- a heredoc or a listing rolled into one line is what nobody can read --
+within MAX-LINES lines and WIDTH characters across them all. Whatever is cut
+is announced, so the file never quietly misrepresents what a tool said."
   (let ((budget width)
         (kept '()))
     (loop for rest on (split-lines (strip-terminal-control-chars string))
@@ -375,10 +365,10 @@ said."
           for index from 0
           do (cond
                ((or (>= index max-lines) (not (plusp budget)))
-                (push (format nil "… (~a more line~:p)" (length rest)) kept)
+                (push (lines-omitted-note (length rest)) kept)
                 (return))
                ((> (length line) budget)
-                (push (concatenate 'string (subseq line 0 budget) "…") kept)
+                (push (truncate-with-ellipsis line budget) kept)
                 (setf budget 0))
                (t
                 (push line kept)
@@ -400,53 +390,55 @@ said."
     ("go" . "go") ("rs" . "rust") ("java" . "java") ("kt" . "kotlin")
     ("php" . "php") ("swift" . "swift") ("r" . "r") ("ex" . "elixir")
     ("mk" . "makefile") ("dockerfile" . "dockerfile"))
-  "File extension -> the name a markdown renderer highlights that language
-under. Only used to label a fenced block; an extension that is missing here
-costs nothing but plain text.")
+  "File extension -> the name a markdown renderer highlights it under. A
+missing extension costs nothing but plain text.")
+
+(defun file-name-of (path)
+  (subseq path (1+ (or (position #\/ path :from-end t) -1))))
+
+(defun file-extension-of (name)
+  (let ((dot (position #\. name :from-end t)))
+    (and dot (subseq name (1+ dot)))))
 
 (defun language-for-path (path)
-  "The highlighting language for the file at PATH, from its extension, or
-from the whole file name for the few that carry no extension (Dockerfile,
-Makefile). NIL when PATH is not a string or names nothing recognised."
+  "The highlighting language for the file at PATH, from its extension or --
+for the few carrying none -- from its whole name. NIL when PATH is not a
+string or names nothing recognised."
   (when (stringp path)
-    (let* ((name (string-downcase (subseq path (1+ (or (position #\/ path :from-end t) -1)))))
-           (dot (position #\. name :from-end t))
-           (extension (and dot (subseq name (1+ dot)))))
+    (let ((name (string-downcase (file-name-of path))))
       (cond
         ((string= name "dockerfile") "dockerfile")
         ((string= name "makefile") "makefile")
-        (extension (cdr (assoc extension *language-by-extension* :test #'string=)))))))
+        (t (cdr (assoc (file-extension-of name) *language-by-extension*
+                       :test #'equal)))))))
 
-(defun fenced (lines &optional language)
-  "LINES as a markdown fenced code block, tagged with LANGUAGE when one is
-known so a renderer can highlight it. The fence is three backticks, or one
-longer than the longest run of backticks inside LINES, so content that is
-itself markdown -- a tool that prints a README, or this very file -- cannot
-close the block early and spill into the page. The fence is what makes the
-body survive being read in anything that renders markdown: an indented
-block may not interrupt a paragraph, so indentation alone left every
-command folded into the headline above it, whereas a fence may."
+(defun longest-backtick-run (lines)
   (let ((longest 0))
-    (dolist (line lines)
+    (dolist (line lines longest)
       (loop with run = 0
             for ch across line
             do (if (char= ch #\`)
                    (setf run (1+ run) longest (max longest run))
-                   (setf run 0))))
-    (let ((fence (make-string (max 3 (1+ longest)) :initial-element #\`)))
-      (append (list (concatenate 'string fence (or language "")))
-              lines
-              (list fence)))))
+                   (setf run 0))))))
+
+(defun fence-marker (lines)
+  "A fence long enough that LINES cannot close the block early -- content
+that is itself markdown, a README or this very file, otherwise spills out."
+  (make-string (max 3 (1+ (longest-backtick-run lines))) :initial-element #\`))
+
+(defun fenced (lines &optional language)
+  "LINES as a markdown fenced code block, tagged with LANGUAGE when one is
+known. Fenced rather than indented because an indented block may not
+interrupt a paragraph, which left every body folded into its headline."
+  (let ((fence (fence-marker lines)))
+    (append (list (concatenate 'string fence (or language "")))
+            lines
+            (list fence))))
 
 (defun tool-history-entry (headline body-lines)
-  "One history entry: a HEADLINE saying what happened -- when, which
-subagent, which tool, and the call's own description when it has one --
-then BODY-LINES on the lines straight below it, the actual command or
-output, fenced and otherwise left exactly as the tool wrote it. Keeping
-headline and body apart is what makes the file skimmable -- the headlines
-read as a narrative of the turn, with the bulky part sitting underneath.
-The only blank line in an entry is the one APPEND-TOOL-HISTORY puts after
-it, so each call reads as a single block."
+  "A HEADLINE saying what happened, with the command or output on the lines
+straight below it. The only blank line in an entry is the one
+APPEND-TOOL-HISTORY puts after it, so each call reads as a single block."
   (format nil "~a~%~{~a~^~%~}" headline body-lines))
 
 (defun tool-value-lines (value &optional language)
@@ -454,11 +446,9 @@ it, so each call reads as a single block."
   (fenced (history-lines (render-value value) *tool-history-value-width*) language))
 
 (defun tool-arg-language (key value input)
-  "What a renderer should highlight one argument as: a command is shell, a
-structured value is the JSON it is written back out as, and the text a tool
-writes into a file takes the language of that file. Everything else -- a
-path, a pattern, a prompt -- is left plain, since guessing wrong colours the
-value as something it is not."
+  "What a renderer should highlight one argument as. Anything not clearly a
+command, a structured value or file content is left plain: guessing wrong
+colours a value as something it is not."
   (cond
     ((equal key "command") "bash")
     ((not (stringp value)) (and (or (hash-table-p value) (vectorp value)) "json"))
@@ -467,45 +457,46 @@ value as something it is not."
 
 (defun tool-description (block)
   "A tool_use BLOCK's own description argument on one line, or NIL when the
-tool takes none. Both the call's entry and its result's repeat it: a long
-body can sit between the two, and a bare \"Bash ⤶ result\" halfway down the
-file says nothing about which piece of work answered."
+tool takes none. The call's entry and its result's both carry it, since a
+long body can sit between the two."
   (let* ((input (gethash "input" block))
          (description (and (hash-table-p input) (gethash "description" input))))
     (and description
          (one-line (render-value description) *tool-history-value-width*))))
 
+(defun keys-shown-in-body (input)
+  "The arguments a call's body lists: all of them but \"description\", which
+is already on the headline."
+  (and (hash-table-p input)
+       (remove "description" (tool-input-keys input) :test #'equal)))
+
+(defun labelled-arg-lines (key input)
+  (let ((value (gethash key input)))
+    (cons (format nil "~a:" key)
+          (tool-value-lines value (tool-arg-language key value input)))))
+
+(defun tool-use-body (input)
+  "A call's arguments as body lines. A call whose only argument is a command
+is written as the bare command: the headline already names the tool, so a
+\"command:\" label above it would be noise."
+  (let ((keys (keys-shown-in-body input)))
+    (cond
+      ((null keys) (fenced (list "(no arguments)")))
+      ((equal keys '("command")) (tool-value-lines (gethash "command" input) "bash"))
+      (t (loop for key in keys append (labelled-arg-lines key input))))))
+
 (defun record-tool-use (subagent-name block)
-  "Write a tool call down: who called what, with the call's own description
-when the tool takes one (Bash and Agent do), then its arguments. A call whose
-only argument is a command is written as the bare command -- the headline
-already says the tool was Bash, so a \"command:\" above it would be noise --
-while a call carrying anything else names every argument it prints and sets
-its value underneath."
-  (let* ((input (gethash "input" block))
-         ;; "description" is left out of the body: it is already the headline.
-         (keys (and (hash-table-p input)
-                    (remove "description" (tool-input-keys input) :test #'equal)))
-         (body (cond
-                 ((null keys) (fenced (list "(no arguments)")))
-                 ((equal keys '("command"))
-                  (tool-value-lines (gethash "command" input) "bash"))
-                 (t (loop for key in keys
-                          for value = (gethash key input)
-                          append (cons (format nil "~a:" key)
-                                       (tool-value-lines
-                                        value (tool-arg-language key value input))))))))
-    (append-tool-history
-     (tool-history-entry
-      (format nil "`~a` ~@[*~a* ~]**~a**~@[ — ~a~]"
-              (tool-history-time) subagent-name (gethash "name" block)
-              (tool-description block))
-      body))))
+  "Write a tool call down: who called what, and what it was handed."
+  (append-tool-history
+   (tool-history-entry
+    (format nil "`~a` ~@[*~a* ~]**~a**~@[ — ~a~]"
+            (tool-history-time) subagent-name (gethash "name" block)
+            (tool-description block))
+    (tool-use-body (gethash "input" block)))))
 
 (defun record-tool-result (subagent-name tool-name description block)
-  "Write what a tool answered down as its own entry. It sits under the call
-it answers by position rather than by nesting -- results arrive after their
-call, and parallel calls interleave -- so the headline repeats the tool's
+  "Write what a tool answered down as its own entry. Results arrive after
+their call and parallel calls interleave, so the headline repeats the tool's
 name and DESCRIPTION to say which call came back."
   (let ((lines (history-lines (tool-result-text block) *tool-history-result-width*)))
     (append-tool-history
@@ -516,32 +507,80 @@ name and DESCRIPTION to say which call came back."
               description)
       (fenced (or lines (list "(no output)")))))))
 
+(defun grey-multiline (string)
+  "Like GREY, but with the colour restarted on each line. rlwrap (which
+agent-run.sh pipes the REPL through) mishandles a colour reset that lands
+past a line boundary, rendering the line in the terminal's default white, so
+a span must never straddle a newline."
+  (let ((start 0) (len (length string)))
+    (with-output-to-string (out)
+      (loop
+        (let ((newline (position #\Newline string :start start)))
+          (write-string (grey (subseq string start (or newline len))) out)
+          (unless newline (return))
+          (write-char #\Newline out)
+          (setf start (1+ newline))
+          (when (>= start len) (return)))))))
+
+(defun subagent-spawning-tool-p (name)
+  "This CLI build calls it \"Agent\", older and other builds \"Task\"; match
+either so subagents do not silently stop being named if it changes back."
+  (member name '("Agent" "Task") :test #'equal))
+
+(defun forwarded-subagent-id (event)
+  "The tool_use id EVENT was forwarded from, or NIL for the top-level agent's
+own messages. shasht parses JSON null as the truthy keyword :NULL, so the
+top level's explicit \"parent_tool_use_id\":null has to be excluded by hand."
+  (let ((parent (gethash "parent_tool_use_id" event)))
+    (and parent (not (eq parent :null)) parent)))
+
+(defun init-event-p (event)
+  (and (equal (gethash "type" event) "system")
+       (equal (gethash "subtype" event) "init")))
+
+(defun message-event-p (event)
+  (member (gethash "type" event) '("assistant" "user") :test #'equal))
+
+(defun message-blocks (event)
+  (or (gethash "content" (gethash "message" event)) #()))
+
+(defun narration-block-p (block-type)
+  (member block-type '("text" "thinking") :test #'equal))
+
+(defun delta-text (delta)
+  "The renderable text a content_block_delta carries, or NIL for a delta of
+some other kind. Many thinking deltas arrive genuinely empty."
+  (let ((delta-type (gethash "type" delta)))
+    (cond
+      ((equal delta-type "thinking_delta") (gethash "thinking" delta))
+      ((equal delta-type "text_delta") (gethash "text" delta)))))
+
+(defun thinking-delta-p (delta)
+  (equal (gethash "type" delta) "thinking_delta"))
+
+(defun text-block-start-p (inner)
+  (and (equal (gethash "type" inner) "content_block_start")
+       (equal (gethash "type" (gethash "content_block" inner)) "text")))
+
+(defun init-trace-line (event)
+  (let ((tools (gethash "tools" event)))
+    (format nil "  ⚙ init~@[ · model ~a~]~@[ · cwd ~a~]~@[ · ~a tools~]"
+            (gethash "model" event)
+            (gethash "cwd" event)
+            (and (vectorp tools) (length tools)))))
+
 (defun make-stream-printer ()
   "Return a fresh ON-EVENT callback for CALL-CLAUDE that renders a
-stream_event live: dim grey for thinking, plain for the reply text, and --
-when *VERBOSE* is on -- a grey line per tool call and per tool result. Ensures
-exactly one blank line separates each transition into a text block —
-thinking -> answering, but also text -> tool call -> text when the model
-keeps talking after using a tool — regardless of how many newlines the
-model's own content happens to carry across that boundary. Tracked via the
-count of trailing newlines already written (capped at 2) rather than an
-unconditional insert, since always inserting one (the previous approach)
-double-spaced whenever the model's own text already supplied the gap, and
-inserting only once ever under-spaced every later transition."
+stream_event live: grey for thinking, plain for the reply text, and -- with
+*VERBOSE* on -- a grey line per tool call and per tool result. Exactly one
+blank line separates each transition into a text block, tracked by counting
+the trailing newlines already written rather than inserting one blindly,
+which double-spaced whenever the model's own text already supplied the gap."
   (let ((trailing-newlines 2) ; RUN's own preamble already ends on a blank line
         (pending-bracket "")
-        ;; Task tool_use id -> subagent name (its "description", falling back
-        ;; to "subagent_type"), learned from the top-level assistant's own
-        ;; tool_use blocks so subagent output can be tagged with which
-        ;; subagent it came from instead of a generic "[subagent]" label.
         (subagent-names (make-hash-table :test #'equal))
-        ;; tool_use id -> tool name, so a tool_result -- which carries only
-        ;; the id it answers -- can say which tool it came back from, and
-        ;; id -> that call's description, so it can say which call too.
         (tool-names (make-hash-table :test #'equal))
         (tool-descriptions (make-hash-table :test #'equal))
-        ;; Whether the last thing written was a verbose trace line, so a run
-        ;; of them stays single spaced (see PRINT-TRACE-LINE).
         (last-line-was-trace nil))
     (labels ((track! (str)
                (loop for ch across str
@@ -554,76 +593,41 @@ inserting only once ever under-spaced every later transition."
                (when (zerop trailing-newlines)
                  (write-char #\Newline)
                  (incf trailing-newlines)))
-             (reconstruct-and-buffer (str)
-               "Like RECONSTRUCT-MISSING-SGR-ESCAPES, but a bare SGR sequence
-can itself be split across delta chunks (\"[3\" then \"3m\") just like
-anything else in a stream. A trailing '[' still plausibly mid-sequence
-(only digits/semicolons so far, no terminator) is held in PENDING-BRACKET
-and prepended to the next chunk instead of being emitted -- and reset --
-early, unfixed."
+             (restore-sgr-escapes (str)
+               "The CLI's text deltas arrive with the ESC of a colour
+sequence already eaten, and a bare sequence can itself be split across
+chunks (\"[3\" then \"3m\"). Put the ESC back, holding a trailing sequence
+that could still complete in PENDING-BRACKET for the next chunk."
                (let* ((full (concatenate 'string pending-bracket str))
                       (len (length full)))
                  (setf pending-bracket "")
                  (with-output-to-string (out)
                    (loop with i = 0
                          while (< i len)
-                         do (if (char= (char full i) #\[)
-                                (let ((end (loop for j from (1+ i) below len
-                                                  for ch = (char full j)
-                                                  do (cond
-                                                       ((or (digit-char-p ch) (char= ch #\;)))
-                                                       ((char= ch #\m) (return (1+ j)))
-                                                       (t (return nil)))
-                                                  finally (return :incomplete))))
-                                  (cond
-                                    ((eq end :incomplete)
-                                     (setf pending-bracket (subseq full i))
-                                     (setf i len))
-                                    (end
-                                     (unless (and (plusp i) (char= (char full (1- i)) #\Escape))
-                                       (write-char #\Escape out))
-                                     (write-string full out :start i :end end)
-                                     (setf i end))
-                                    (t
-                                     (write-char (char full i) out)
-                                     (incf i))))
-                                (progn
-                                  (write-char (char full i) out)
-                                  (incf i)))))))
-             (grey-across-newlines (string)
-               "Like GREY, but safe for a chunk that may itself contain an
-embedded newline (thinking_delta chunks routinely do, e.g. at a paragraph
-break) -- wrapping such a chunk in one GREY call would put the SGR reset
-after that newline, which rlwrap renders in the terminal's default color
-instead of grey, the same failure PRINT-SUBAGENT-BLOCK's grey span already
-works around by keeping start/reset on the same side of every newline."
-               (let ((start 0) (len (length string)))
-                 (with-output-to-string (out)
-                   (loop
-                     (let ((nl (position #\Newline string :start start)))
-                       (write-string (grey (subseq string start (or nl len))) out)
-                       (unless nl (return))
-                       (write-char #\Newline out)
-                       (setf start (1+ nl))
-                       (when (>= start len) (return)))))))
+                         do (let ((end (and (char= (char full i) #\[)
+                                            (sgr-parameters-end full i))))
+                              (cond
+                                ((eq end :incomplete)
+                                 (setf pending-bracket (subseq full i))
+                                 (setf i len))
+                                ((integerp end)
+                                 (unless (and (plusp i) (char= (char full (1- i)) #\Escape))
+                                   (write-char #\Escape out))
+                                 (write-string full out :start i :end end)
+                                 (setf i end))
+                                (t
+                                 (write-char (char full i) out)
+                                 (incf i))))))))
              (flush-pending! ()
-               "A held-back PENDING-BRACKET never completes if the block
-ends right there -- emit it as literal, unfixed text rather than losing it."
+               "A held-back sequence never completes if the block ends right
+there -- emit it as literal text rather than losing it."
                (unless (zerop (length pending-bracket))
                  (write-string pending-bracket)
                  (setf pending-bracket "")))
              (print-subagent-block (content-key subagent-name block)
-               "A --forward-subagent-text block arrives as a single
-complete string (not incremental deltas like the main agent's own
-content), so there's no chunk-boundary/SGR-buffering concern here -- just
-sanitize and print it as one unit, tagged with which subagent it came
-from so it's visually distinct from the main agent's own narration. The
-GREY-wrapped span deliberately excludes the trailing newline -- when it
-was included, the SGR start code and its reset ended up either side of
-a \\n inside one write, and rlwrap (which agent-run.sh pipes the REPL
-through for readline editing) mishandles color resets that land past a
-line boundary like that, so the line rendered in the terminal's default
-white instead of grey."
+               "A forwarded subagent block arrives whole rather than as
+deltas, so it is printed as one unit, tagged with the subagent it came
+from. The grey span stops before the newline, per GREY-MULTILINE."
                (let ((clean (strip-terminal-control-chars (gethash content-key block))))
                  (unless (zerop (length clean))
                    (flush-pending!)
@@ -635,13 +639,10 @@ white instead of grey."
                    (setf last-line-was-trace nil)
                    (finish-output))))
              (print-trace-line (line)
-               "One grey line of the *VERBOSE* trace. The first one after any
-other output gets the usual blank line separating it from the text above,
-but a run of them -- the common case, a model firing several tools back to
-back -- stays single spaced instead of double spacing the whole trace. LINE
-is always newline-free (see ONE-LINE), so the coloured span and its reset
-stay on the same side of the line break, which is the rlwrap constraint
-PRINT-SUBAGENT-BLOCK documents."
+               "One grey line of the *VERBOSE* trace. A run of them stays
+single spaced -- the common case, a model firing several tools back to back
+-- while the first after other output gets a blank line above it. LINE is
+newline-free (see ONE-LINE), as GREY-MULTILINE's constraint requires."
                (flush-pending!)
                (if last-line-was-trace (ensure-line-start) (ensure-blank-line))
                (write-string (grey line))
@@ -649,21 +650,22 @@ PRINT-SUBAGENT-BLOCK documents."
                (track! (concatenate 'string line (string #\Newline)))
                (setf last-line-was-trace t)
                (finish-output))
-             (print-tool-use (subagent-name block)
-               "Record a tool call in the tool history and, when *VERBOSE* is
-on, echo it: which tool, and what it was handed. Also records the call's id
-so PRINT-TOOL-RESULT can name the tool its result belongs to. The history is
-written either way -- *VERBOSE* governs the terminal, not the file."
+             (remember-call (block)
                (setf (gethash (gethash "id" block) tool-names) (gethash "name" block)
-                     (gethash (gethash "id" block) tool-descriptions) (tool-description block))
+                     (gethash (gethash "id" block) tool-descriptions) (tool-description block)))
+             (print-tool-use (subagent-name block)
+               "Record a tool call in the history and, with *VERBOSE* on, echo
+it. The history is written either way: *VERBOSE* governs the terminal, not
+the file."
+               (remember-call block)
                (record-tool-use subagent-name block)
                (when *verbose*
                  (print-trace-line (format nil "  ⚒ ~@[[~a] ~]~a"
                                            subagent-name (format-tool-use block)))))
              (print-tool-result (subagent-name block)
-               "Record what a tool answered, and when *VERBOSE* is on echo it
-too, under the name of the tool that was called -- a tool_result block itself
-only carries the tool_use id."
+               "Record what a tool answered, and with *VERBOSE* on echo it,
+under the name of the call it answers -- a tool_result block itself carries
+only the tool_use id."
                (let ((tool-name (or (gethash (gethash "tool_use_id" block) tool-names) "tool")))
                  (record-tool-result subagent-name tool-name
                                      (gethash (gethash "tool_use_id" block) tool-descriptions)
@@ -676,133 +678,105 @@ only carries the tool_use id."
                               (json-true-p (gethash "is_error" block))
                               (if (zerop (length text)) "(no output)" text)))))))
              (remember-subagent-name (block)
-               "Learn a subagent-spawning tool_use's id -> name mapping, so
---forward-subagent-text blocks tagged with that id can be labelled with the
-subagent they came from rather than a generic \"subagent\". This CLI build
-calls that tool \"Agent\" (older/other builds call it \"Task\") -- match
-either name so this doesn't silently stop naming subagents if it ever
-changes back."
-               (when (member (gethash "name" block) '("Agent" "Task") :test #'equal)
+               "Learn a subagent-spawning call's id -> name, so blocks
+forwarded under that id are labelled with the subagent they came from
+rather than a generic \"subagent\"."
+               (when (subagent-spawning-tool-p (gethash "name" block))
                  (let* ((input (gethash "input" block))
                         (name (and (hash-table-p input)
                                    (or (gethash "description" input)
                                        (gethash "subagent_type" input)))))
                    (when name
                      (setf (gethash (gethash "id" block) subagent-names) name))))))
-      (lambda (event)
-        (let ((event-type (gethash "type" event)))
+      (labels ((print-delta (delta)
+                 (let* ((raw (delta-text delta))
+                        (clean (and raw
+                                    (strip-terminal-control-chars
+                                     (if (thinking-delta-p delta) raw (restore-sgr-escapes raw))))))
+                   (when (and clean (plusp (length clean)))
+                     (write-string (if (thinking-delta-p delta) (grey-multiline clean) clean))
+                     (track! clean)
+                     (setf last-line-was-trace nil)
+                     (finish-output))))
+               (print-stream-event (inner)
+                 (let ((inner-type (gethash "type" inner)))
+                   (cond
+                     ((text-block-start-p inner)
+                      (flush-pending!)
+                      (ensure-blank-line)
+                      (setf last-line-was-trace nil)
+                      (finish-output))
+                     ((equal inner-type "content_block_stop")
+                      (flush-pending!)
+                      (finish-output))
+                     ((equal inner-type "content_block_delta")
+                      (print-delta (gethash "delta" inner))))))
+               (subagent-name-of (event)
+                 (let ((parent (forwarded-subagent-id event)))
+                   (and parent (or (gethash parent subagent-names) "subagent"))))
+               (print-message-block (subagent-name block)
+                 (let ((block-type (gethash "type" block)))
+                   (cond
+                     ;; The top-level agent's own narration already streamed
+                     ;; in as deltas; only a subagent's arrives whole, here.
+                     ((and subagent-name (narration-block-p block-type))
+                      (print-subagent-block block-type subagent-name block))
+                     ((equal block-type "tool_use")
+                      (remember-subagent-name block)
+                      (print-tool-use subagent-name block))
+                     ((equal block-type "tool_result")
+                      (print-tool-result subagent-name block)))))
+               (print-message (event)
+                 (let ((subagent-name (subagent-name-of event)))
+                   (loop for block across (message-blocks event)
+                         do (print-message-block subagent-name block)))))
+        (lambda (event)
           (cond
-            ((equal event-type "stream_event")
+            ((equal (gethash "type" event) "stream_event")
              (sb-thread:with-mutex (*output-lock*)
-               (let* ((inner (gethash "event" event))
-                      (inner-type (gethash "type" inner)))
-                 (cond
-                   ((and (equal inner-type "content_block_start")
-                         (equal (gethash "type" (gethash "content_block" inner)) "text"))
-                    (flush-pending!)
-                    (ensure-blank-line)
-                    (setf last-line-was-trace nil)
-                    (finish-output))
-                   ((equal inner-type "content_block_stop")
-                    (flush-pending!)
-                    (finish-output))
-                   ((equal inner-type "content_block_delta")
-                    (let* ((delta (gethash "delta" inner))
-                           (delta-type (gethash "type" delta))
-                           (clean (cond
-                                    ((equal delta-type "thinking_delta")
-                                     (strip-terminal-control-chars (gethash "thinking" delta)))
-                                    ((equal delta-type "text_delta")
-                                     (strip-terminal-control-chars
-                                      (reconstruct-and-buffer (gethash "text" delta)))))))
-                      ;; Many thinking_delta chunks arrive genuinely empty; skip
-                      ;; the write+flush entirely rather than doing a no-op
-                      ;; syscall for invisible content on every single one.
-                      (when (and clean (plusp (length clean)))
-                        (write-string (if (equal delta-type "thinking_delta") (grey-across-newlines clean) clean))
-                        (track! clean)
-                        (setf last-line-was-trace nil)
-                        (finish-output))))))))
-            ;; The CLI's opening event, which says which session, model and
-            ;; working directory the turn actually got -- the "where" every
-            ;; relative path in the trace below is relative to.
-            ((and *verbose*
-                  (equal event-type "system")
-                  (equal (gethash "subtype" event) "init"))
+               (print-stream-event (gethash "event" event))))
+            ((and *verbose* (init-event-p event))
              (sb-thread:with-mutex (*output-lock*)
-               (let ((tools (gethash "tools" event)))
-                 (print-trace-line
-                  (format nil "  ⚙ init~@[ · model ~a~]~@[ · cwd ~a~]~@[ · ~a tools~]"
-                          (gethash "model" event)
-                          (gethash "cwd" event)
-                          (and (vectorp tools) (length tools)))))))
-            ;; Whole (non-partial) messages, which is where tool calls and
-            ;; their results show up -- and, with --forward-subagent-text,
-            ;; where a subagent's own text/thinking is relayed as a top-level
-            ;; message tagged with the id of the Task/Agent tool_use that
-            ;; spawned it, instead of leaving subagent-heavy turns silent.
-            ;; shasht parses JSON null as the truthy keyword :NULL, not NIL --
-            ;; without excluding it explicitly, the top-level's own messages
-            ;; (which carry an explicit "parent_tool_use_id":null) would
-            ;; wrongly look like forwarded subagent output.
-            ((member event-type '("assistant" "user") :test #'equal)
+               (print-trace-line (init-trace-line event))))
+            ((message-event-p event)
              (sb-thread:with-mutex (*output-lock*)
-               (let* ((parent (gethash "parent_tool_use_id" event))
-                      (blocks (or (gethash "content" (gethash "message" event)) #()))
-                      ;; NIL for the top-level agent's own messages, the
-                      ;; subagent's name for a forwarded one.
-                      (subagent-name (when (and parent (not (eq parent :null)))
-                                       (or (gethash parent subagent-names) "subagent"))))
-                 (loop for block across blocks
-                       for block-type = (gethash "type" block)
-                       do (cond
-                            ;; The top-level agent's own text and thinking
-                            ;; already streamed in as deltas above; only a
-                            ;; subagent's arrives whole, here.
-                            ((and subagent-name
-                                  (member block-type '("text" "thinking") :test #'equal))
-                             (print-subagent-block block-type subagent-name block))
-                            ((equal block-type "tool_use")
-                             (remember-subagent-name block)
-                             (print-tool-use subagent-name block))
-                            ((equal block-type "tool_result")
-                             (print-tool-result subagent-name block)))))))))))))
+               (print-message event)))))))))
 
 (defun drain-stderr (process)
-  "Forward the child process's stderr to *error-output*, sanitizing each
-line first. Runs on its own thread so it can drain concurrently with the
-main stdout loop — :error t would inherit the terminal directly and let
-the CLI's own raw progress/status output (e.g. \\r-redraws) bypass
-sanitization entirely."
+  "Forward the child's stderr to *error-output*, sanitizing each line, on its
+own thread. :error t would instead inherit the terminal directly and let the
+CLI's raw progress output bypass sanitization entirely."
   (loop for line = (ignore-errors (read-line (sb-ext:process-error process) nil nil))
         while line
         do (sb-thread:with-mutex (*output-lock*)
              (format *error-output* "[error] ~a~%" (strip-terminal-control-chars line))
              (finish-output *error-output*))))
 
+(defun claude-cli-args (prompt session-id)
+  "The CLI invocation for PROMPT. stream-json is the only output format that
+reports rate_limit_event lines alongside the result, and partial messages are
+what break a reply into deltas we can render as they arrive."
+  (append (list "-p" prompt
+                "--output-format" "stream-json"
+                "--include-partial-messages"
+                "--verbose"
+                "--model" *model*
+                "--permission-mode" *permission-mode*
+                ;; Stops the CLI writing its own spinners and borders straight
+                ;; to the terminal, bypassing our pipes and our sanitizing.
+                "--ax-screen-reader"
+                ;; Without it a subagent-heavy turn stays silent until the
+                ;; subagent finishes.
+                "--forward-subagent-text")
+          (when *effort* (list "--effort" *effort*))
+          (when session-id (list "--resume" session-id))))
+
 (defun call-claude (prompt on-event)
   "Run the claude CLI on PROMPT, calling ON-EVENT with each parsed JSON event
-as it arrives so the caller can render thinking/text while the CLI is still
-working instead of waiting for the process to exit.
+as it arrives, so the caller can render the turn while it is still working.
 Returns (values answer-text session-id total-cost-usd rate-limit-info usage)."
   (let* ((session-id (read-session-id))
-         (args (append (list "-p" prompt
-                              "--output-format" "stream-json"
-                              "--include-partial-messages"
-                              "--verbose"
-                              "--model" *model*
-                              "--permission-mode" *permission-mode*
-                              ;; The CLI can write its own decorative UI (spinners,
-                              ;; borders, animations) straight to the terminal,
-                              ;; bypassing our stdout/stderr pipes entirely — this
-                              ;; flag turns that off at the source.
-                              "--ax-screen-reader"
-                              ;; Without this, a subagent-heavy turn (Task tool)
-                              ;; is completely silent until the subagent finishes;
-                              ;; this surfaces its text/thinking as it happens.
-                              "--forward-subagent-text")
-                       (when *effort* (list "--effort" *effort*))
-                       (when session-id (list "--resume" session-id))))
+         (args (claude-cli-args prompt session-id))
          (process (sb-ext:run-program *claude-bin* args
                                        :output :stream :error :stream
                                        :external-format '(:utf-8 :replacement #\?)
@@ -829,18 +803,18 @@ Returns (values answer-text session-id total-cost-usd rate-limit-info usage)."
             (gethash "usage" result))))
 
 ;;; --- usage reporting ---------------------------------------------------
-;;; Rendered just above the separator so every reply shows where the
-;;; account stands on the rolling 5h/7d rate-limit windows and what the
-;;; call cost, in dollars.
+;;; Printed just above the separator: where the account stands on the rolling
+;;; 5h/7d rate-limit windows, and what the call cost.
+
+(defparameter +reset-time-format+
+  '((:year 4) #\- (:month 2) #\- (:day 2) #\Space
+    (:hour 2) #\: (:min 2) #\Space :timezone))
 
 (defun format-reset-time (epoch-seconds)
-  "Reset instant rendered in *TIMEZONE*, e.g. \"2026-09-23 03:59 CEST\".
-Falls back to UTC when *TIMEZONE* names no known zone."
-  (local-time:format-timestring
-   nil (local-time:unix-to-timestamp epoch-seconds)
-   :format '((:year 4) #\- (:month 2) #\- (:day 2) #\Space
-             (:hour 2) #\: (:min 2) #\Space :timezone)
-   :timezone (or (find-timezone *timezone*) local-time:+utc-zone+)))
+  "Reset instant in *TIMEZONE*, e.g. \"2026-09-23 03:59 CEST\"."
+  (local-time:format-timestring nil (local-time:unix-to-timestamp epoch-seconds)
+                                :format +reset-time-format+
+                                :timezone (display-timezone)))
 
 (defun format-remaining (epoch-seconds)
   "Human-readable countdown from now until EPOCH-SECONDS, e.g. \"2d 3h\" or
@@ -865,9 +839,7 @@ Falls back to UTC when *TIMEZONE* names no known zone."
               (format-remaining resets-at)))))
 
 (defun format-windows (rate-limit)
-  "The Session(5h)/Week(7d) lines alone, empty string when RATE-LIMIT is nil.
-Shared between FORMAT-USAGE (after every real call) and USAGE (which has no
-rate-limit data of its own, since /usage is answered locally by the CLI)."
+  "The Session(5h)/Week(7d) lines alone, empty string when RATE-LIMIT is nil."
   (let* ((windows (and rate-limit (gethash "unifiedWindows" rate-limit)))
          (five-hour (format-window "Session (5h)" (and windows (gethash "five_hour" windows))))
          (seven-day (format-window "Week (7d)" (and windows (gethash "seven_day" windows)))))
@@ -876,8 +848,8 @@ rate-limit data of its own, since /usage is answered locally by the CLI)."
       (when seven-day (format s "~a~%" seven-day)))))
 
 (defun format-tokens (usage)
-  "One line of per-call token counts from a result event's USAGE hash table:
-input/output tokens plus cache read/creation tokens when present."
+  "One line of per-call token counts: input and output, plus cache read and
+creation when present."
   (when usage
     (let ((input (gethash "input_tokens" usage))
           (output (gethash "output_tokens" usage))
@@ -897,14 +869,15 @@ input/output tokens plus cache read/creation tokens when present."
 
 ;;; --- entry point ------------------------------------------------------------
 
+;;; Redefined below, once RUN exists for it to point at: this placeholder is
+;;; only here so RUN can call USE without a forward reference.
 (defun use () nil)
 
 (defun usage ()
-  "Print the claude CLI's own /usage report (subscription session/week limits
-and usage breakdown). /usage is answered locally by the CLI, not by the
-model, so this costs nothing and doesn't touch the conversation history.
-Also prints the exact reset countdown from the last real call, when one
-has happened this session, since /usage's own text has no such payload."
+  "Print the CLI's own /usage report, plus the exact reset countdown from the
+last real call. /usage is answered locally by the CLI rather than by the
+model, so it costs nothing and does not touch the conversation history -- and
+carries no rate-limit payload of its own, hence *LAST-RATE-LIMIT*."
   (multiple-value-bind (text) (call-claude "/usage" (lambda (event) (declare (ignore event))))
     (sb-thread:with-mutex (*output-lock*)
       (format t "~&~a~%" (strip-terminal-control-chars text))
@@ -979,12 +952,10 @@ since rendering would silently fall back to UTC later on."
         *timezone*)))
 
 (defun set-verbose (&optional (on (not *verbose*)))
-  "Turn the verbose tool trace on or off; called with no argument it toggles,
-so (set-verbose) flips it and (set-verbose nil) forces it off. With it on,
-every tool the CLI runs prints a grey line as it happens -- the tool's name
-and arguments when it starts, a preview of its output when it answers, both
-tagged with the subagent's name when the call came from one -- so a long turn
-shows what it is actually doing instead of going quiet between paragraphs."
+  "Turn the verbose tool trace on or off, toggling when called with no
+argument. With it on, every tool the CLI runs prints a grey line as it
+happens -- name and arguments when it starts, a preview when it answers --
+so a long turn shows what it is doing instead of going quiet."
   (setf *verbose* (and on t))
   (format t "~&Verbose: ~:[off~;on~]~%" *verbose*)
   *verbose*)
