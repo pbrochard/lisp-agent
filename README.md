@@ -1,3 +1,13 @@
+## This fork
+
+This fork exists because the single-file version is small enough to read end to end before you run it: one loop, one tool, one endpoint, no filesystem access it didn't get from you. It is still `eval` on your host — see the warning below — and it applies to this file only. **Do not run the [`hocwp`](../../tree/hocwp) branch this way.** That branch drives the Claude Code CLI with `--permission-mode bypassPermissions`, mounts your source tree read-write and keeps live API credentials in its environment; outside the container there is nothing left between it and your home directory. It ships `./build.sh` and `./run.sh` for that reason, and has no supported bare-metal path.
+
+## The `hocwp` branch
+
+[`hocwp`](../../tree/hocwp) branch grows this ~100-line demo into a working agent: four interchangeable backends behind one `(run ...)` — OpenRouter, the Anthropic API, Gemini, Ollama and the Claude Code CLI — each with its own memory, plus REPL tooling (prompt editing, live tool traces, usage and cost reporting, skills).
+Where `main` is the idea stripped to its essentials, `hocwp` is the version used daily, and it trades the demo's restraint for reach: `bypassPermissions`, mounted host sources, real credentials in the environment.
+It is container-only as a result — `./build.sh` then `./run.sh`, never on your host; pair it with [home-docker](https://github.com/pbrochard/home-docker) to give it a disposable `$HOME` of its own.
+
 # lisp-agent
 
 > "LISP is the language for AI." — my professor, circa 2000
@@ -96,7 +106,7 @@ Any OpenRouter model that supports tool calling works. Swap `*model*` and nothin
 
 ## ⚠️ Read this before you get clever
 
-`eval` as a tool means the model executes arbitrary code wherever the agent runs. That is the entire point, and also the entire risk. Run it in the container, mount nothing you care about, and treat the host as off limits. This is a toy for a sandbox, not a pattern for production.
+`eval` as a tool means the model executes arbitrary code wherever the agent runs. That is the entire point, and also the entire risk. Run it in the container, mount nothing you care about, and treat the host as off limits. This is a toy for a sandbox, not a pattern for production. On the [`hocwp`](../../tree/hocwp) branch the sandbox stops being advice and becomes a requirement.
 
 ## Why
 
