@@ -405,6 +405,16 @@ shifted right by INDENT when it is sitting underneath its own name."
         (mapcar (lambda (line) (concatenate 'string indent line)) lines)
         lines)))
 
+(defun tool-description (block)
+  "A tool_use BLOCK's own description argument on one line, or NIL when the
+tool takes none. Both the call's entry and its result's repeat it: a long
+body can sit between the two, and a bare \"Bash ⤶ result\" halfway down the
+file says nothing about which piece of work answered."
+  (let* ((input (gethash "input" block))
+         (description (and (hash-table-p input) (gethash "description" input))))
+    (and description
+         (one-line (render-value description) *tool-history-value-width*))))
+
 (defun record-tool-use (subagent-name block)
   "Write a tool call down: who called what, with the call's own description
 when the tool takes one (Bash and Agent do), then its arguments. A call whose
@@ -413,7 +423,6 @@ already says the tool was Bash, so a \"command:\" above it would be noise --
 while a call carrying anything else names every argument it prints and sets
 its value underneath."
   (let* ((input (gethash "input" block))
-         (description (and (hash-table-p input) (gethash "description" input)))
          ;; "description" is left out of the body: it is already the headline.
          (keys (and (hash-table-p input)
                     (remove "description" (tool-input-keys input) :test #'equal)))
@@ -428,21 +437,21 @@ its value underneath."
      (tool-history-entry
       (format nil "`~a` ~@[*~a* ~]**~a**~@[ — ~a~]"
               (tool-history-time) subagent-name (gethash "name" block)
-              (and description (one-line (render-value description)
-                                         *tool-history-value-width*)))
+              (tool-description block))
       body))))
 
-(defun record-tool-result (subagent-name tool-name block)
+(defun record-tool-result (subagent-name tool-name description block)
   "Write what a tool answered down as its own entry. It sits under the call
 it answers by position rather than by nesting -- results arrive after their
 call, and parallel calls interleave -- so the headline repeats the tool's
-name to say which call came back."
+name and DESCRIPTION to say which call came back."
   (let ((lines (history-lines (tool-result-text block) *tool-history-result-width*)))
     (append-tool-history
      (tool-history-entry
-      (format nil "`~a` ~@[*~a* ~]**~a** ⤶ ~:[result~;failed~]"
+      (format nil "`~a` ~@[*~a* ~]**~a** ⤶ ~:[result~;failed~]~@[ — ~a~]"
               (tool-history-time) subagent-name tool-name
-              (json-true-p (gethash "is_error" block)))
+              (json-true-p (gethash "is_error" block))
+              description)
       (or lines (list "(no output)"))))))
 
 (defun make-stream-printer ()
@@ -465,8 +474,10 @@ inserting only once ever under-spaced every later transition."
         ;; subagent it came from instead of a generic "[subagent]" label.
         (subagent-names (make-hash-table :test #'equal))
         ;; tool_use id -> tool name, so a tool_result -- which carries only
-        ;; the id it answers -- can say which tool it came back from.
+        ;; the id it answers -- can say which tool it came back from, and
+        ;; id -> that call's description, so it can say which call too.
         (tool-names (make-hash-table :test #'equal))
+        (tool-descriptions (make-hash-table :test #'equal))
         ;; Whether the last thing written was a verbose trace line, so a run
         ;; of them stays single spaced (see PRINT-TRACE-LINE).
         (last-line-was-trace nil))
@@ -581,7 +592,8 @@ PRINT-SUBAGENT-BLOCK documents."
 on, echo it: which tool, and what it was handed. Also records the call's id
 so PRINT-TOOL-RESULT can name the tool its result belongs to. The history is
 written either way -- *VERBOSE* governs the terminal, not the file."
-               (setf (gethash (gethash "id" block) tool-names) (gethash "name" block))
+               (setf (gethash (gethash "id" block) tool-names) (gethash "name" block)
+                     (gethash (gethash "id" block) tool-descriptions) (tool-description block))
                (record-tool-use subagent-name block)
                (when *verbose*
                  (print-trace-line (format nil "  ⚒ ~@[[~a] ~]~a"
@@ -591,7 +603,9 @@ written either way -- *VERBOSE* governs the terminal, not the file."
 too, under the name of the tool that was called -- a tool_result block itself
 only carries the tool_use id."
                (let ((tool-name (or (gethash (gethash "tool_use_id" block) tool-names) "tool")))
-                 (record-tool-result subagent-name tool-name block)
+                 (record-tool-result subagent-name tool-name
+                                     (gethash (gethash "tool_use_id" block) tool-descriptions)
+                                     block)
                  (when *verbose*
                    (let ((text (one-line (tool-result-text block) *verbose-result-width*)))
                      (print-trace-line
