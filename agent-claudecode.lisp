@@ -385,46 +385,52 @@ said."
                 (decf budget (length line)))))
     (nreverse kept)))
 
-(defun tool-arg-lines (key value width)
-  "One argument as the lines it occupies: key=\"value\" on a single line when
-the value has only one, and otherwise the value's own lines as they stand,
-opening quote on the first and closing quote trailing the last."
-  (let ((lines (history-lines (render-value value) width)))
-    (cond
-      ((null lines) (list (format nil "~a=\"\"" key)))
-      ((null (rest lines)) (list (format nil "~a=\"~a\"" key (first lines))))
-      (t (append (list (format nil "~a=\"~a" key (first lines)))
-                 (butlast (rest lines))
-                 (list (format nil "~a\"" (car (last lines)))))))))
-
 (defun tool-history-entry (headline body-lines)
   "One history entry: a HEADLINE saying what happened -- when, which
 subagent, which tool, and the call's own description when it has one --
 then BODY-LINES on the lines straight below it, the actual command or
-output, indented by four spaces. Keeping the two apart is what makes the
-file skimmable: the headlines read as a narrative of the turn, with the
-bulky part sitting underneath. The only blank line in an entry is the one
-APPEND-TOOL-HISTORY puts after it, so each call reads as a single block."
+output, indented by four spaces and otherwise left exactly as the tool
+wrote them: no quotes around them, no fence, nothing to read past. Keeping
+headline and body apart is what makes the file skimmable -- the headlines
+read as a narrative of the turn, with the bulky part sitting underneath.
+The only blank line in an entry is the one APPEND-TOOL-HISTORY puts after
+it, so each call reads as a single block."
   (format nil "~a~%~{    ~a~^~%~}" headline body-lines))
+
+(defun tool-value-lines (value &optional indent)
+  "One argument's value as body lines, bounded like every other body and
+shifted right by INDENT when it is sitting underneath its own name."
+  (let ((lines (history-lines (render-value value) *tool-history-value-width*)))
+    (if indent
+        (mapcar (lambda (line) (concatenate 'string indent line)) lines)
+        lines)))
 
 (defun record-tool-use (subagent-name block)
   "Write a tool call down: who called what, with the call's own description
-when the tool takes one (Bash and Agent do), then one line per argument."
+when the tool takes one (Bash and Agent do), then its arguments. A call whose
+only argument is a command is written as the bare command -- the headline
+already says the tool was Bash, so a \"command=\" above it would be noise --
+while a call carrying anything else names every argument it prints and sets
+its value underneath."
   (let* ((input (gethash "input" block))
          (description (and (hash-table-p input) (gethash "description" input)))
          ;; "description" is left out of the body: it is already the headline.
-         (args (when (hash-table-p input)
-                 (loop for key in (tool-input-keys input)
-                       unless (equal key "description")
-                         append (tool-arg-lines key (gethash key input)
-                                                *tool-history-value-width*)))))
+         (keys (and (hash-table-p input)
+                    (remove "description" (tool-input-keys input) :test #'equal)))
+         (body (cond
+                 ((null keys) (list "(no arguments)"))
+                 ((equal keys '("command"))
+                  (tool-value-lines (gethash "command" input)))
+                 (t (loop for key in keys
+                          append (cons (format nil "~a=" key)
+                                       (tool-value-lines (gethash key input) "  ")))))))
     (append-tool-history
      (tool-history-entry
       (format nil "`~a` ~@[*~a* ~]**~a**~@[ — ~a~]"
               (tool-history-time) subagent-name (gethash "name" block)
               (and description (one-line (render-value description)
                                          *tool-history-value-width*)))
-      (or args (list "(no arguments)"))))))
+      body))))
 
 (defun record-tool-result (subagent-name tool-name block)
   "Write what a tool answered down as its own entry. It sits under the call
