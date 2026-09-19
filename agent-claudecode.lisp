@@ -385,14 +385,47 @@ said."
                 (decf budget (length line)))))
     (nreverse kept)))
 
-(defun fenced (lines)
-  "LINES as a markdown fenced code block. The fence is three backticks, or
-one longer than the longest run of backticks inside LINES, so content that
-is itself markdown -- a tool that prints a README, or this very file --
-cannot close the block early and spill into the page. The fence is what
-makes the body survive being read in anything that renders markdown: an
-indented block may not interrupt a paragraph, so indentation alone left
-every command folded into the headline above it, whereas a fence may."
+(defparameter *language-by-extension*
+  '(("lisp" . "lisp") ("asd" . "lisp") ("cl" . "lisp") ("el" . "elisp")
+    ("scm" . "scheme") ("clj" . "clojure")
+    ("sh" . "bash") ("bash" . "bash") ("zsh" . "bash") ("fish" . "fish")
+    ("py" . "python") ("rb" . "ruby") ("pl" . "perl") ("lua" . "lua")
+    ("js" . "javascript") ("mjs" . "javascript") ("cjs" . "javascript")
+    ("jsx" . "jsx") ("ts" . "typescript") ("tsx" . "tsx")
+    ("json" . "json") ("yaml" . "yaml") ("yml" . "yaml") ("toml" . "toml")
+    ("xml" . "xml") ("html" . "html") ("css" . "css") ("scss" . "scss")
+    ("md" . "markdown") ("markdown" . "markdown") ("org" . "org")
+    ("sql" . "sql") ("csv" . "csv") ("diff" . "diff") ("patch" . "diff")
+    ("c" . "c") ("h" . "c") ("cpp" . "cpp") ("cc" . "cpp") ("hpp" . "cpp")
+    ("go" . "go") ("rs" . "rust") ("java" . "java") ("kt" . "kotlin")
+    ("php" . "php") ("swift" . "swift") ("r" . "r") ("ex" . "elixir")
+    ("mk" . "makefile") ("dockerfile" . "dockerfile"))
+  "File extension -> the name a markdown renderer highlights that language
+under. Only used to label a fenced block; an extension that is missing here
+costs nothing but plain text.")
+
+(defun language-for-path (path)
+  "The highlighting language for the file at PATH, from its extension, or
+from the whole file name for the few that carry no extension (Dockerfile,
+Makefile). NIL when PATH is not a string or names nothing recognised."
+  (when (stringp path)
+    (let* ((name (string-downcase (subseq path (1+ (or (position #\/ path :from-end t) -1)))))
+           (dot (position #\. name :from-end t))
+           (extension (and dot (subseq name (1+ dot)))))
+      (cond
+        ((string= name "dockerfile") "dockerfile")
+        ((string= name "makefile") "makefile")
+        (extension (cdr (assoc extension *language-by-extension* :test #'string=)))))))
+
+(defun fenced (lines &optional language)
+  "LINES as a markdown fenced code block, tagged with LANGUAGE when one is
+known so a renderer can highlight it. The fence is three backticks, or one
+longer than the longest run of backticks inside LINES, so content that is
+itself markdown -- a tool that prints a README, or this very file -- cannot
+close the block early and spill into the page. The fence is what makes the
+body survive being read in anything that renders markdown: an indented
+block may not interrupt a paragraph, so indentation alone left every
+command folded into the headline above it, whereas a fence may."
   (let ((longest 0))
     (dolist (line lines)
       (loop with run = 0
@@ -401,7 +434,9 @@ every command folded into the headline above it, whereas a fence may."
                    (setf run (1+ run) longest (max longest run))
                    (setf run 0))))
     (let ((fence (make-string (max 3 (1+ longest)) :initial-element #\`)))
-      (append (list fence) lines (list fence)))))
+      (append (list (concatenate 'string fence (or language "")))
+              lines
+              (list fence)))))
 
 (defun tool-history-entry (headline body-lines)
   "One history entry: a HEADLINE saying what happened -- when, which
@@ -414,9 +449,21 @@ The only blank line in an entry is the one APPEND-TOOL-HISTORY puts after
 it, so each call reads as a single block."
   (format nil "~a~%~{~a~^~%~}" headline body-lines))
 
-(defun tool-value-lines (value)
+(defun tool-value-lines (value &optional language)
   "One argument's value as a fenced block, bounded like every other body."
-  (fenced (history-lines (render-value value) *tool-history-value-width*)))
+  (fenced (history-lines (render-value value) *tool-history-value-width*) language))
+
+(defun tool-arg-language (key value input)
+  "What a renderer should highlight one argument as: a command is shell, a
+structured value is the JSON it is written back out as, and the text a tool
+writes into a file takes the language of that file. Everything else -- a
+path, a pattern, a prompt -- is left plain, since guessing wrong colours the
+value as something it is not."
+  (cond
+    ((equal key "command") "bash")
+    ((not (stringp value)) (and (or (hash-table-p value) (vectorp value)) "json"))
+    ((member key '("content" "new_string" "old_string") :test #'equal)
+     (language-for-path (gethash "file_path" input)))))
 
 (defun tool-description (block)
   "A tool_use BLOCK's own description argument on one line, or NIL when the
@@ -442,10 +489,12 @@ its value underneath."
          (body (cond
                  ((null keys) (fenced (list "(no arguments)")))
                  ((equal keys '("command"))
-                  (tool-value-lines (gethash "command" input)))
+                  (tool-value-lines (gethash "command" input) "bash"))
                  (t (loop for key in keys
+                          for value = (gethash key input)
                           append (cons (format nil "~a:" key)
-                                       (tool-value-lines (gethash key input))))))))
+                                       (tool-value-lines
+                                        value (tool-arg-language key value input))))))))
     (append-tool-history
      (tool-history-entry
       (format nil "`~a` ~@[*~a* ~]**~a**~@[ — ~a~]"
