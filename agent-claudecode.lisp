@@ -385,25 +385,38 @@ said."
                 (decf budget (length line)))))
     (nreverse kept)))
 
+(defun fenced (lines)
+  "LINES as a markdown fenced code block. The fence is three backticks, or
+one longer than the longest run of backticks inside LINES, so content that
+is itself markdown -- a tool that prints a README, or this very file --
+cannot close the block early and spill into the page. The fence is what
+makes the body survive being read in anything that renders markdown: an
+indented block may not interrupt a paragraph, so indentation alone left
+every command folded into the headline above it, whereas a fence may."
+  (let ((longest 0))
+    (dolist (line lines)
+      (loop with run = 0
+            for ch across line
+            do (if (char= ch #\`)
+                   (setf run (1+ run) longest (max longest run))
+                   (setf run 0))))
+    (let ((fence (make-string (max 3 (1+ longest)) :initial-element #\`)))
+      (append (list fence) lines (list fence)))))
+
 (defun tool-history-entry (headline body-lines)
   "One history entry: a HEADLINE saying what happened -- when, which
 subagent, which tool, and the call's own description when it has one --
 then BODY-LINES on the lines straight below it, the actual command or
-output, indented by four spaces and otherwise left exactly as the tool
-wrote them: no quotes around them, no fence, nothing to read past. Keeping
+output, fenced and otherwise left exactly as the tool wrote it. Keeping
 headline and body apart is what makes the file skimmable -- the headlines
 read as a narrative of the turn, with the bulky part sitting underneath.
 The only blank line in an entry is the one APPEND-TOOL-HISTORY puts after
 it, so each call reads as a single block."
-  (format nil "~a~%~{    ~a~^~%~}" headline body-lines))
+  (format nil "~a~%~{~a~^~%~}" headline body-lines))
 
-(defun tool-value-lines (value &optional indent)
-  "One argument's value as body lines, bounded like every other body and
-shifted right by INDENT when it is sitting underneath its own name."
-  (let ((lines (history-lines (render-value value) *tool-history-value-width*)))
-    (if indent
-        (mapcar (lambda (line) (concatenate 'string indent line)) lines)
-        lines)))
+(defun tool-value-lines (value)
+  "One argument's value as a fenced block, bounded like every other body."
+  (fenced (history-lines (render-value value) *tool-history-value-width*)))
 
 (defun tool-description (block)
   "A tool_use BLOCK's own description argument on one line, or NIL when the
@@ -427,12 +440,12 @@ its value underneath."
          (keys (and (hash-table-p input)
                     (remove "description" (tool-input-keys input) :test #'equal)))
          (body (cond
-                 ((null keys) (list "(no arguments)"))
+                 ((null keys) (fenced (list "(no arguments)")))
                  ((equal keys '("command"))
                   (tool-value-lines (gethash "command" input)))
                  (t (loop for key in keys
                           append (cons (format nil "~a:" key)
-                                       (tool-value-lines (gethash key input) "  ")))))))
+                                       (tool-value-lines (gethash key input))))))))
     (append-tool-history
      (tool-history-entry
       (format nil "`~a` ~@[*~a* ~]**~a**~@[ — ~a~]"
@@ -452,7 +465,7 @@ name and DESCRIPTION to say which call came back."
               (tool-history-time) subagent-name tool-name
               (json-true-p (gethash "is_error" block))
               description)
-      (or lines (list "(no output)"))))))
+      (fenced (or lines (list "(no output)")))))))
 
 (defun make-stream-printer ()
   "Return a fresh ON-EVENT callback for CALL-CLAUDE that renders a
