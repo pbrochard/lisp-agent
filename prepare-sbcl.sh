@@ -9,4 +9,4 @@ curl -sO https://beta.quicklisp.org/quicklisp.lisp \
 	&& rm quicklisp.lisp
 
 # Bake the dependencies into the image so startup is instant.
-sbcl --non-interactive --eval '(ql:quickload (list :dexador :shasht) :silent t)'
+sbcl --non-interactive --eval '(ql:quickload (list :dexador :shasht :local-time) :silent t)'
