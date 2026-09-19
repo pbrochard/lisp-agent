@@ -10,6 +10,10 @@
 ;;;; Usage:
 ;;;;   sbcl --load agent-claudecode.lisp --eval '(agent-claudecode:run "...")'
 ;;;;
+;;;; Verbose: (cc:verbose) toggles a live trace of the work itself -- every
+;;;; tool the CLI runs, with its arguments, and a preview of what came back --
+;;;; printed in grey alongside the usual thinking/answer stream.
+;;;;
 ;;;; Memory: Claude Code keeps its own session transcript on disk. We only
 ;;;; remember the session id between runs so --resume picks the same
 ;;;; conversation back up; a copy of the exchange is also appended to
@@ -23,7 +27,8 @@
   (:use :cl :utils :common :cl-ansi-text)
   (:export #:run #:use #:forget #:set-model #:list-models #:lm #:*models*
            #:set-effort #:list-efforts #:le #:*efforts* #:usage
-           #:set-timezone #:*timezone*)
+           #:set-timezone #:*timezone*
+           #:verbose #:set-verbose #:*verbose*)
   (:nicknames :cc :claudecode :ccode))
 
 (in-package :agent-claudecode)
@@ -53,6 +58,13 @@
 ;;; --effort accepts a fixed set of levels; nil means "don't pass the flag"
 ;;; and let the CLI use its own default.
 (defparameter *efforts* (vector "low" "medium" "high" "xhigh" "max"))
+
+;;; When on, every tool the CLI runs is echoed as it happens -- which tool,
+;;; with which arguments, and a preview of what it answered -- instead of the
+;;; turn showing only the model's own prose. Off by default: on a long turn
+;;; that is a lot of output, and it is meant for watching the work happen,
+;;; not for normal reading. See SET-VERBOSE.
+(defparameter *verbose* nil)
 
 ;;; Timezone the rate-limit reset times are rendered in. An IANA name, since
 ;;; a fixed UTC offset would be wrong half the year anywhere that keeps DST.
@@ -153,9 +165,116 @@ hot path."
                       (incf i))))))
       string))
 
+;;; --- the verbose tool trace ----------------------------------------------
+;;; The CLI announces each tool it runs as a tool_use content block, and what
+;;; the tool answered as a matching tool_result block in the following
+;;; message. Neither is shown at all unless *VERBOSE* is on, in which case
+;;; each becomes one grey line in the stream, in between the model's own
+;;; paragraphs.
+
+(defparameter *verbose-value-width* 160
+  "How much of a single tool argument is shown. A Write's entire file content
+or an Edit's replacement text would otherwise bury the very line that is
+supposed to summarize the call.")
+
+(defparameter *verbose-result-width* 160
+  "How much of a tool's output is shown. Same reasoning as
+*VERBOSE-VALUE-WIDTH*: a Read of a long file answers with the whole file.")
+
+(defparameter *tool-input-key-order*
+  '("command" "file_path" "pattern" "glob" "path" "url" "query" "prompt"
+    "description" "subagent_type" "old_string" "new_string" "content")
+  "Argument names printed first, in this order, ahead of every other argument
+alphabetically. Hash table iteration order is unspecified in Common Lisp, so
+without a fixed order the same call could list its arguments differently from
+one run to the next, and the argument that actually identifies the call --
+which file, which command -- would not reliably come first.")
+
+(defun one-line (string width)
+  "STRING as a single line of at most WIDTH characters: terminal control
+characters stripped first (tool arguments and results are model/tool output,
+every bit as untrusted as the model's own text), runs of whitespace --
+including the newlines of a multi-line shell command or of file content --
+collapsed to a single space, and whatever is left cut off with an ellipsis.
+Staying on one line is what keeps a tool argument from swamping the trace,
+and it also sidesteps the grey-across-newlines problem PRINT-SUBAGENT-BLOCK
+documents, since there is never a newline inside the coloured span."
+  (let ((flat (string-right-trim
+               " "
+               (with-output-to-string (out)
+                 ;; Starting out already "inside" whitespace also drops any
+                 ;; leading blank lines, which heredocs and file contents
+                 ;; routinely carry.
+                 (loop with previous-space = t
+                       for ch across (strip-terminal-control-chars string)
+                       for space = (member ch '(#\Space #\Tab #\Newline))
+                       do (if space
+                              (unless previous-space (write-char #\Space out))
+                              (write-char ch out))
+                          (setf previous-space (and space t)))))))
+    (if (> (length flat) width)
+        (concatenate 'string (subseq flat 0 width) "…")
+        flat)))
+
+(defun render-value (value)
+  "A tool argument rendered as text: strings as they stand, anything else
+(numbers, booleans, nested objects and arrays) written back out as JSON.
+shasht parses JSON true/false/null as the keywords :TRUE/:FALSE/:NULL, which
+~a would print as \":TRUE\"; sending them back through shasht shows them as
+the tool was actually handed them."
+  (if (stringp value)
+      value
+      (with-output-to-string (s) (shasht:write-json value s))))
+
+(defun tool-input-keys (input)
+  "INPUT's argument names, *TOOL-INPUT-KEY-ORDER* first and all the rest
+alphabetically."
+  (sort (hash-table-keys input)
+        (lambda (a b)
+          (let ((rank-a (position a *tool-input-key-order* :test #'equal))
+                (rank-b (position b *tool-input-key-order* :test #'equal)))
+            (cond ((and rank-a rank-b) (< rank-a rank-b))
+                  (rank-a t)
+                  (rank-b nil)
+                  (t (string< a b)))))))
+
+(defun format-tool-use (block)
+  "One line describing a tool_use BLOCK: the tool's name, then its arguments
+as key=\"value\" pairs."
+  (let ((input (gethash "input" block)))
+    (format nil "~a~{~a~}"
+            (gethash "name" block)
+            (when (hash-table-p input)
+              (loop for key in (tool-input-keys input)
+                    collect (format nil "  ~a=\"~a\"" key
+                                    (one-line (render-value (gethash key input))
+                                              *verbose-value-width*)))))))
+
+(defun tool-result-text (block)
+  "The text a tool_result BLOCK carries. Its \"content\" is a plain string
+for most tools, but an array of content blocks when a tool answers in several
+parts (text alongside an image, say), of which only the text parts can be
+shown on a line."
+  (let ((content (gethash "content" block)))
+    (cond
+      ((stringp content) content)
+      ((vectorp content)
+       (format nil "~{~a~^ ~}"
+               (loop for part across content
+                     when (and (hash-table-p part)
+                               (equal (gethash "type" part) "text"))
+                       collect (gethash "text" part))))
+      (t ""))))
+
+(defun json-true-p (value)
+  "True for a JSON true, which shasht parses as the keyword :TRUE rather than
+as T."
+  (and (member value '(:true t)) t))
+
 (defun make-stream-printer ()
   "Return a fresh ON-EVENT callback for CALL-CLAUDE that renders a
-stream_event live: dim grey for thinking, plain for the reply text. Ensures
+stream_event live: dim grey for thinking, plain for the reply text, and --
+when *VERBOSE* is on -- a grey line per tool call and per tool result. Ensures
 exactly one blank line separates each transition into a text block —
 thinking -> answering, but also text -> tool call -> text when the model
 keeps talking after using a tool — regardless of how many newlines the
@@ -170,7 +289,13 @@ inserting only once ever under-spaced every later transition."
         ;; to "subagent_type"), learned from the top-level assistant's own
         ;; tool_use blocks so subagent output can be tagged with which
         ;; subagent it came from instead of a generic "[subagent]" label.
-        (subagent-names (make-hash-table :test #'equal)))
+        (subagent-names (make-hash-table :test #'equal))
+        ;; tool_use id -> tool name, so a tool_result -- which carries only
+        ;; the id it answers -- can say which tool it came back from.
+        (tool-names (make-hash-table :test #'equal))
+        ;; Whether the last thing written was a verbose trace line, so a run
+        ;; of them stays single spaced (see PRINT-TRACE-LINE).
+        (last-line-was-trace nil))
     (labels ((track! (str)
                (loop for ch across str
                      do (setf trailing-newlines (if (char= ch #\Newline) (min 2 (1+ trailing-newlines)) 0))))
@@ -178,6 +303,10 @@ inserting only once ever under-spaced every later transition."
                (loop while (< trailing-newlines 2)
                      do (write-char #\Newline)
                         (incf trailing-newlines)))
+             (ensure-line-start ()
+               (when (zerop trailing-newlines)
+                 (write-char #\Newline)
+                 (incf trailing-newlines)))
              (reconstruct-and-buffer (str)
                "Like RECONSTRUCT-MISSING-SGR-ESCAPES, but a bare SGR sequence
 can itself be split across delta chunks (\"[3\" then \"3m\") just like
@@ -256,7 +385,54 @@ white instead of grey."
                      (write-string (grey line))
                      (write-char #\Newline)
                      (track! (concatenate 'string line (string #\Newline))))
-                   (finish-output)))))
+                   (setf last-line-was-trace nil)
+                   (finish-output))))
+             (print-trace-line (line)
+               "One grey line of the *VERBOSE* trace. The first one after any
+other output gets the usual blank line separating it from the text above,
+but a run of them -- the common case, a model firing several tools back to
+back -- stays single spaced instead of double spacing the whole trace. LINE
+is always newline-free (see ONE-LINE), so the coloured span and its reset
+stay on the same side of the line break, which is the rlwrap constraint
+PRINT-SUBAGENT-BLOCK documents."
+               (flush-pending!)
+               (if last-line-was-trace (ensure-line-start) (ensure-blank-line))
+               (write-string (grey line))
+               (write-char #\Newline)
+               (track! (concatenate 'string line (string #\Newline)))
+               (setf last-line-was-trace t)
+               (finish-output))
+             (print-tool-use (subagent-name block)
+               "Echo a tool call: which tool, and what it was handed. Also
+records the call's id so PRINT-TOOL-RESULT can name the tool its result
+belongs to."
+               (setf (gethash (gethash "id" block) tool-names) (gethash "name" block))
+               (print-trace-line (format nil "  ⚒ ~@[[~a] ~]~a"
+                                         subagent-name (format-tool-use block))))
+             (print-tool-result (subagent-name block)
+               "Echo what a tool answered, under the name of the tool that was
+called -- a tool_result block itself only carries the tool_use id."
+               (let ((text (one-line (tool-result-text block) *verbose-result-width*)))
+                 (print-trace-line
+                  (format nil "  ⤶ ~@[[~a] ~]~a~:[~; failed~]: ~a"
+                          subagent-name
+                          (or (gethash (gethash "tool_use_id" block) tool-names) "tool")
+                          (json-true-p (gethash "is_error" block))
+                          (if (zerop (length text)) "(no output)" text)))))
+             (remember-subagent-name (block)
+               "Learn a subagent-spawning tool_use's id -> name mapping, so
+--forward-subagent-text blocks tagged with that id can be labelled with the
+subagent they came from rather than a generic \"subagent\". This CLI build
+calls that tool \"Agent\" (older/other builds call it \"Task\") -- match
+either name so this doesn't silently stop naming subagents if it ever
+changes back."
+               (when (member (gethash "name" block) '("Agent" "Task") :test #'equal)
+                 (let* ((input (gethash "input" block))
+                        (name (and (hash-table-p input)
+                                   (or (gethash "description" input)
+                                       (gethash "subagent_type" input)))))
+                   (when name
+                     (setf (gethash (gethash "id" block) subagent-names) name))))))
       (lambda (event)
         (let ((event-type (gethash "type" event)))
           (cond
@@ -269,6 +445,7 @@ white instead of grey."
                          (equal (gethash "type" (gethash "content_block" inner)) "text"))
                     (flush-pending!)
                     (ensure-blank-line)
+                    (setf last-line-was-trace nil)
                     (finish-output))
                    ((equal inner-type "content_block_stop")
                     (flush-pending!)
@@ -288,43 +465,52 @@ white instead of grey."
                       (when (and clean (plusp (length clean)))
                         (write-string (if (equal delta-type "thinking_delta") (grey-across-newlines clean) clean))
                         (track! clean)
+                        (setf last-line-was-trace nil)
                         (finish-output))))))))
-            ;; --forward-subagent-text relays a subagent's own text/thinking
-            ;; as whole top-level assistant/user messages tagged with the
-            ;; Task tool_use id that spawned it, instead of leaving
-            ;; subagent-heavy turns totally silent. shasht parses JSON null
-            ;; as the truthy keyword :NULL, not NIL -- without excluding it
-            ;; explicitly, the top-level's own messages (which carry an
-            ;; explicit "parent_tool_use_id":null) would wrongly match the
-            ;; forwarding branch below; instead they're where a Task
-            ;; tool_use's id gets learned so later forwarded blocks can be
-            ;; tagged with the subagent's own name/type instead of a bare
-            ;; "[subagent]" label.
+            ;; The CLI's opening event, which says which session, model and
+            ;; working directory the turn actually got -- the "where" every
+            ;; relative path in the trace below is relative to.
+            ((and *verbose*
+                  (equal event-type "system")
+                  (equal (gethash "subtype" event) "init"))
+             (sb-thread:with-mutex (*output-lock*)
+               (let ((tools (gethash "tools" event)))
+                 (print-trace-line
+                  (format nil "  ⚙ init~@[ · model ~a~]~@[ · cwd ~a~]~@[ · ~a tools~]"
+                          (gethash "model" event)
+                          (gethash "cwd" event)
+                          (and (vectorp tools) (length tools)))))))
+            ;; Whole (non-partial) messages, which is where tool calls and
+            ;; their results show up -- and, with --forward-subagent-text,
+            ;; where a subagent's own text/thinking is relayed as a top-level
+            ;; message tagged with the id of the Task/Agent tool_use that
+            ;; spawned it, instead of leaving subagent-heavy turns silent.
+            ;; shasht parses JSON null as the truthy keyword :NULL, not NIL --
+            ;; without excluding it explicitly, the top-level's own messages
+            ;; (which carry an explicit "parent_tool_use_id":null) would
+            ;; wrongly look like forwarded subagent output.
             ((member event-type '("assistant" "user") :test #'equal)
              (sb-thread:with-mutex (*output-lock*)
-               (let ((parent (gethash "parent_tool_use_id" event))
-                     (blocks (or (gethash "content" (gethash "message" event)) #())))
-                 (if (and parent (not (eq parent :null)))
-                     (let ((subagent-name (or (gethash parent subagent-names) "subagent")))
-                       (loop for block across blocks
-                             do (cond
-                                  ((equal (gethash "type" block) "text")
-                                   (print-subagent-block "text" subagent-name block))
-                                  ((equal (gethash "type" block) "thinking")
-                                   (print-subagent-block "thinking" subagent-name block)))))
-                     (loop for block across blocks
-                           ;; This CLI build calls the subagent-spawning tool
-                           ;; "Agent" (older/other builds call it "Task") --
-                           ;; match either name so this doesn't silently stop
-                           ;; naming subagents if that ever changes back.
-                           when (and (equal (gethash "type" block) "tool_use")
-                                     (member (gethash "name" block) '("Agent" "Task") :test #'equal))
-                             do (let* ((input (gethash "input" block))
-                                       (subagent-name (or (gethash "description" input)
-                                                           (gethash "subagent_type" input))))
-                                  (when subagent-name
-                                    (setf (gethash (gethash "id" block) subagent-names)
-                                          subagent-name))))))))))))))
+               (let* ((parent (gethash "parent_tool_use_id" event))
+                      (blocks (or (gethash "content" (gethash "message" event)) #()))
+                      ;; NIL for the top-level agent's own messages, the
+                      ;; subagent's name for a forwarded one.
+                      (subagent-name (when (and parent (not (eq parent :null)))
+                                       (or (gethash parent subagent-names) "subagent"))))
+                 (loop for block across blocks
+                       for block-type = (gethash "type" block)
+                       do (cond
+                            ;; The top-level agent's own text and thinking
+                            ;; already streamed in as deltas above; only a
+                            ;; subagent's arrives whole, here.
+                            ((and subagent-name
+                                  (member block-type '("text" "thinking") :test #'equal))
+                             (print-subagent-block block-type subagent-name block))
+                            ((equal block-type "tool_use")
+                             (remember-subagent-name block)
+                             (when *verbose* (print-tool-use subagent-name block)))
+                            ((and *verbose* (equal block-type "tool_result"))
+                             (print-tool-result subagent-name block)))))))))))))
 
 (defun drain-stderr (process)
   "Forward the child process's stderr to *error-output*, sanitizing each
@@ -541,3 +727,18 @@ since rendering would silently fall back to UTC later on."
       (progn
         (format t "~&Unknown timezone: ~a (keeping ~a)~%" name *timezone*)
         *timezone*)))
+
+(defun set-verbose (&optional (on (not *verbose*)))
+  "Turn the verbose tool trace on or off; called with no argument it toggles,
+so (set-verbose) flips it and (set-verbose nil) forces it off. With it on,
+every tool the CLI runs prints a grey line as it happens -- the tool's name
+and arguments when it starts, a preview of its output when it answers, both
+tagged with the subagent's name when the call came from one -- so a long turn
+shows what it is actually doing instead of going quiet between paragraphs."
+  (setf *verbose* (and on t))
+  (format t "~&Verbose: ~:[off~;on~]~%" *verbose*)
+  *verbose*)
+
+(defun verbose (&optional (on (not *verbose*)))
+  "Shorthand for SET-VERBOSE, to type at the REPL."
+  (set-verbose on))
