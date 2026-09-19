@@ -252,24 +252,24 @@ alphabetically."
                   (rank-b nil)
                   (t (string< a b)))))))
 
-(defun format-tool-args (input width)
-  "A tool_use's arguments as key=\"value\" pairs on one line, each value cut
-off at WIDTH. Separate from FORMAT-TOOL-USE because the terminal trace and
-the tool history file render the same arguments at different widths -- a
-line has a terminal to fit in, a file does not."
-  (if (hash-table-p input)
-      (format nil "~{~a~}"
-              (loop for key in (tool-input-keys input)
-                    collect (format nil "  ~a=\"~a\"" key
-                                    (one-line (render-value (gethash key input)) width))))
-      ""))
+(defun tool-arg-strings (input width &optional omit)
+  "A tool_use's arguments as a list of key=\"value\" strings, each value cut
+off at WIDTH, arguments named in OMIT left out. A list rather than one
+string because the terminal trace strings them along a single line while the
+history file gives each its own -- and they use different widths, a line
+having a terminal to fit inside where a file does not."
+  (when (hash-table-p input)
+    (loop for key in (tool-input-keys input)
+          unless (member key omit :test #'equal)
+            collect (format nil "~a=\"~a\"" key
+                            (one-line (render-value (gethash key input)) width)))))
 
 (defun format-tool-use (block)
   "One line describing a tool_use BLOCK: the tool's name, then its arguments
 as key=\"value\" pairs."
-  (format nil "~a~a"
+  (format nil "~a~{  ~a~}"
           (gethash "name" block)
-          (format-tool-args (gethash "input" block) *verbose-value-width*)))
+          (tool-arg-strings (gethash "input" block) *verbose-value-width*)))
 
 (defun tool-result-text (block)
   "The text a tool_result BLOCK carries. Its \"content\" is a plain string
@@ -318,15 +318,16 @@ history entry can be lined up against what was on screen."
    nil (local-time:now) :format format
    :timezone (or (find-timezone *timezone*) local-time:+utc-zone+)))
 
-(defun append-tool-history (line)
-  "Append LINE to TOOLS-FILE. Failures are swallowed on purpose: the history
+(defun append-tool-history (entry)
+  "Append ENTRY to TOOLS-FILE, followed by the blank line that keeps it
+separate from the next one. Failures are swallowed on purpose: the history
 is a side record, and an unwritable /agent/data should not take down the
 turn that is busy producing the output the user actually asked for."
   (ignore-errors
     (with-open-file (out TOOLS-FILE :direction :output
                                     :if-exists :append
                                     :if-does-not-exist :create)
-      (write-line line out))))
+      (format out "~a~%~%" entry))))
 
 (defun reset-tool-history ()
   "Truncate TOOLS-FILE back to just its heading, so a run's history holds
@@ -339,24 +340,43 @@ that run's tools and nothing from the one before."
               (tool-history-time '((:year 4) #\- (:month 2) #\- (:day 2) #\Space
                                    (:hour 2) #\: (:min 2) #\: (:sec 2) #\Space :timezone))))))
 
+(defun tool-history-entry (headline body-lines)
+  "One history entry: a HEADLINE saying what happened -- when, which
+subagent, which tool, and the call's own description when it has one --
+then BODY-LINES on the lines straight below it, the actual command or
+output, indented by four spaces. Keeping the two apart is what makes the
+file skimmable: the headlines read as a narrative of the turn, with the
+bulky part sitting underneath. The only blank line in an entry is the one
+APPEND-TOOL-HISTORY puts after it, so each call reads as a single block."
+  (format nil "~a~%~{    ~a~^~%~}" headline body-lines))
+
 (defun record-tool-use (subagent-name block)
-  "Write a tool call down as a markdown list item: when it happened, which
-subagent asked for it (if any), the tool, and what it was handed."
-  (append-tool-history
-   (format nil "- `~a` ~@[*~a* ~]**~a**~a"
-           (tool-history-time) subagent-name (gethash "name" block)
-           (format-tool-args (gethash "input" block) *tool-history-value-width*))))
+  "Write a tool call down: who called what, with the call's own description
+when the tool takes one (Bash and Agent do), then one line per argument."
+  (let* ((input (gethash "input" block))
+         (description (and (hash-table-p input) (gethash "description" input)))
+         ;; Omitted from the body because it is already the headline.
+         (args (tool-arg-strings input *tool-history-value-width* '("description"))))
+    (append-tool-history
+     (tool-history-entry
+      (format nil "`~a` ~@[*~a* ~]**~a**~@[ — ~a~]"
+              (tool-history-time) subagent-name (gethash "name" block)
+              (and description (one-line (render-value description)
+                                         *tool-history-value-width*)))
+      (or args (list "(no arguments)"))))))
 
 (defun record-tool-result (subagent-name tool-name block)
-  "Write what a tool answered down as a sub-item of the call it answers.
-Nesting is by position: results arrive after their call, and parallel calls
-interleave, hence the tool name repeated on the result line too."
+  "Write what a tool answered down as its own entry. It sits under the call
+it answers by position rather than by nesting -- results arrive after their
+call, and parallel calls interleave -- so the headline repeats the tool's
+name to say which call came back."
   (let ((text (one-line (tool-result-text block) *tool-history-result-width*)))
     (append-tool-history
-     (format nil "  - `~a` ~@[*~a* ~]~a~:[~; failed~]: ~a"
-             (tool-history-time) subagent-name tool-name
-             (json-true-p (gethash "is_error" block))
-             (if (zerop (length text)) "(no output)" text)))))
+     (tool-history-entry
+      (format nil "`~a` ~@[*~a* ~]**~a** ⤶ ~:[result~;failed~]"
+              (tool-history-time) subagent-name tool-name
+              (json-true-p (gethash "is_error" block)))
+      (list (if (zerop (length text)) "(no output)" text))))))
 
 (defun make-stream-printer ()
   "Return a fresh ON-EVENT callback for CALL-CLAUDE that renders a
