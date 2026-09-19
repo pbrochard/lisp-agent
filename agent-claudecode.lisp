@@ -252,17 +252,14 @@ alphabetically."
                   (rank-b nil)
                   (t (string< a b)))))))
 
-(defun tool-arg-strings (input width &optional omit)
-  "A tool_use's arguments as a list of key=\"value\" strings, each value cut
-off at WIDTH, arguments named in OMIT left out. A list rather than one
-string because the terminal trace strings them along a single line while the
-history file gives each its own -- and they use different widths, a line
-having a terminal to fit inside where a file does not."
+(defun tool-arg-strings (input width)
+  "A tool_use's arguments as a list of key=\"value\" strings, each flattened
+onto one line and cut off at WIDTH. This is the terminal trace's rendering;
+the history file keeps the lines a value actually has, see TOOL-ARG-LINES."
   (when (hash-table-p input)
     (loop for key in (tool-input-keys input)
-          unless (member key omit :test #'equal)
-            collect (format nil "~a=\"~a\"" key
-                            (one-line (render-value (gethash key input)) width)))))
+          collect (format nil "~a=\"~a\"" key
+                          (one-line (render-value (gethash key input)) width)))))
 
 (defun format-tool-use (block)
   "One line describing a tool_use BLOCK: the tool's name, then its arguments
@@ -340,6 +337,66 @@ that run's tools and nothing from the one before."
               (tool-history-time '((:year 4) #\- (:month 2) #\- (:day 2) #\Space
                                    (:hour 2) #\: (:min 2) #\: (:sec 2) #\Space :timezone))))))
 
+(defparameter *tool-history-max-lines* 60
+  "How many lines of a single command or result the history keeps. The point
+of the file is to be able to read back what a turn did, and a Read of a long
+file or a chatty test run would otherwise bury that under thousands of lines
+of someone else's output.")
+
+(defun split-lines (string)
+  "STRING's lines, each right-trimmed of trailing whitespace, with leading and
+trailing blank lines dropped -- tool output routinely arrives wrapped in
+them, and in the history they would only push the next entry away from its
+headline."
+  (let ((lines (loop with start = 0
+                     for newline = (position #\Newline string :start start)
+                     collect (string-right-trim '(#\Space #\Tab #\Return)
+                                                (subseq string start (or newline (length string))))
+                     while newline
+                     do (setf start (1+ newline)))))
+    (loop while (and lines (zerop (length (first lines))))
+          do (pop lines))
+    (loop while (and lines (zerop (length (car (last lines)))))
+          do (setf lines (butlast lines)))
+    lines))
+
+(defun history-lines (string width &optional (max-lines *tool-history-max-lines*))
+  "STRING as the body lines of a history entry: kept as the several lines it
+really has, since a shell heredoc or a directory listing rolled into one line
+is exactly the output nobody can read. Bounded all the same -- at most
+MAX-LINES lines and WIDTH characters across them all -- because a tool can
+answer with a whole file. What gets cut is announced on a line of its own
+rather than vanishing, so the file never quietly misrepresents what a tool
+said."
+  (let ((budget width)
+        (kept '()))
+    (loop for rest on (split-lines (strip-terminal-control-chars string))
+          for line = (first rest)
+          for index from 0
+          do (cond
+               ((or (>= index max-lines) (not (plusp budget)))
+                (push (format nil "… (~a more line~:p)" (length rest)) kept)
+                (return))
+               ((> (length line) budget)
+                (push (concatenate 'string (subseq line 0 budget) "…") kept)
+                (setf budget 0))
+               (t
+                (push line kept)
+                (decf budget (length line)))))
+    (nreverse kept)))
+
+(defun tool-arg-lines (key value width)
+  "One argument as the lines it occupies: key=\"value\" on a single line when
+the value has only one, and otherwise the value's own lines as they stand,
+opening quote on the first and closing quote trailing the last."
+  (let ((lines (history-lines (render-value value) width)))
+    (cond
+      ((null lines) (list (format nil "~a=\"\"" key)))
+      ((null (rest lines)) (list (format nil "~a=\"~a\"" key (first lines))))
+      (t (append (list (format nil "~a=\"~a" key (first lines)))
+                 (butlast (rest lines))
+                 (list (format nil "~a\"" (car (last lines)))))))))
+
 (defun tool-history-entry (headline body-lines)
   "One history entry: a HEADLINE saying what happened -- when, which
 subagent, which tool, and the call's own description when it has one --
@@ -355,8 +412,12 @@ APPEND-TOOL-HISTORY puts after it, so each call reads as a single block."
 when the tool takes one (Bash and Agent do), then one line per argument."
   (let* ((input (gethash "input" block))
          (description (and (hash-table-p input) (gethash "description" input)))
-         ;; Omitted from the body because it is already the headline.
-         (args (tool-arg-strings input *tool-history-value-width* '("description"))))
+         ;; "description" is left out of the body: it is already the headline.
+         (args (when (hash-table-p input)
+                 (loop for key in (tool-input-keys input)
+                       unless (equal key "description")
+                         append (tool-arg-lines key (gethash key input)
+                                                *tool-history-value-width*)))))
     (append-tool-history
      (tool-history-entry
       (format nil "`~a` ~@[*~a* ~]**~a**~@[ — ~a~]"
@@ -370,13 +431,13 @@ when the tool takes one (Bash and Agent do), then one line per argument."
 it answers by position rather than by nesting -- results arrive after their
 call, and parallel calls interleave -- so the headline repeats the tool's
 name to say which call came back."
-  (let ((text (one-line (tool-result-text block) *tool-history-result-width*)))
+  (let ((lines (history-lines (tool-result-text block) *tool-history-result-width*)))
     (append-tool-history
      (tool-history-entry
       (format nil "`~a` ~@[*~a* ~]**~a** ⤶ ~:[result~;failed~]"
               (tool-history-time) subagent-name tool-name
               (json-true-p (gethash "is_error" block)))
-      (list (if (zerop (length text)) "(no output)" text))))))
+      (or lines (list "(no output)"))))))
 
 (defun make-stream-printer ()
   "Return a fresh ON-EVENT callback for CALL-CLAUDE that renders a
