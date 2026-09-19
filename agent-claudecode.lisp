@@ -409,7 +409,7 @@ shifted right by INDENT when it is sitting underneath its own name."
   "Write a tool call down: who called what, with the call's own description
 when the tool takes one (Bash and Agent do), then its arguments. A call whose
 only argument is a command is written as the bare command -- the headline
-already says the tool was Bash, so a \"command=\" above it would be noise --
+already says the tool was Bash, so a \"command:\" above it would be noise --
 while a call carrying anything else names every argument it prints and sets
 its value underneath."
   (let* ((input (gethash "input" block))
@@ -422,7 +422,7 @@ its value underneath."
                  ((equal keys '("command"))
                   (tool-value-lines (gethash "command" input)))
                  (t (loop for key in keys
-                          append (cons (format nil "~a=" key)
+                          append (cons (format nil "~a:" key)
                                        (tool-value-lines (gethash key input) "  ")))))))
     (append-tool-history
      (tool-history-entry
