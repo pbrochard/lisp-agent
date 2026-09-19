@@ -1,4 +1,7 @@
 #! /bin/sh
 
 clear
-tail -F -n 200 claudecode-tools.md | batcat --paging=never --language=md --unbuffered --plain
+echo "Following logs in $(pwd)/claudecode-tools.md"
+echo "____"
+
+tail -F -n 0 claudecode-tools.md | batcat --paging=never --language=md --unbuffered --plain
