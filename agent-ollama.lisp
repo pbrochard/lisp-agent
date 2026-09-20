@@ -14,7 +14,7 @@
 ;;;;   (agent:forget)                   ; wipe the slate
 
 (defpackage :agent-ollama
-  (:use :cl utils :common)
+  (:use :cl utils :http-utils :common)
   (:export #:run #:use #:forget)
   (:nicknames :ol :ollama))
 
@@ -51,19 +51,16 @@
 ;;; --- talking to the model ----------------------------------------------
 
 (defun call-model (messages)
-  (shasht:read-json
-   (dex:post *endpoint*
-             :headers '(("content-type" . "application/json"))
-			 :read-timeout 100000
-             :content (shasht:write-json
-                       (obj "model" *model*
-                            "stream" :false
-                            "messages"
-                            (coerce (cons (obj "role" "system" "content" system-prompt)
-                                          messages)
-                                    'vector)
-                            "tools" *tools*)
-                       nil))))
+  (http-post-json
+   *endpoint*
+   '(("content-type" . "application/json"))
+   (obj "model" *model*
+        "stream" :false
+        "messages" (coerce (cons (obj "role" "system" "content" system-prompt)
+                                 messages)
+                           'vector)
+        "tools" *tools*)
+   :read-timeout 100000))
 
 ;;; --- the loop itself ----------------------------------------------------
 ;;; An agent is a recursive function over a growing list of messages.

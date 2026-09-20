@@ -14,7 +14,7 @@
 ;;;;   (agent:forget)                   ; wipe the slate
 
 (defpackage :agent
-  (:use :cl :utils :common)
+  (:use :cl :utils :http-utils :common)
   (:export #:run #:use #:forget)
   (:nicknames :a :ag))
 
@@ -56,15 +56,13 @@
 ;;; --- talking to the model ----------------------------------------------
 
 (defun call-model (messages)
-  (shasht:read-json
-   (dex:post *endpoint*
-             :headers `(("Authorization" . ,(format nil "Bearer ~a" *api-key*))
-                        ("Content-Type" . "application/json"))
-             :content (shasht:write-json
-                       (obj "model" *model*
-                            "messages" (coerce messages 'vector)
-                            "tools" *tools*)
-                       nil))))
+  (http-post-json
+   *endpoint*
+   `(("Authorization" . ,(format nil "Bearer ~a" *api-key*))
+     ("Content-Type" . "application/json"))
+   (obj "model" *model*
+        "messages" (coerce messages 'vector)
+        "tools" *tools*)))
 
 ;;; --- the loop itself ----------------------------------------------------
 ;;; An agent is a recursive function over a growing list of messages.

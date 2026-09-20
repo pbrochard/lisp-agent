@@ -14,7 +14,7 @@
 ;;;;   (agent:forget)                   ; wipe the slate
 
 (defpackage :agent-gemini
-  (:use :cl :utils :common)
+  (:use :cl :utils :http-utils :common)
   (:export #:run #:use #:forget #:list-models :*models* #:lm #:llm #:set-model)
   (:nicknames :g :gm :gem :gemini))
 
@@ -52,16 +52,13 @@
 ;;; --- talking to the model ----------------------------------------------
 
 (defun call-model (contents)
-  (shasht:read-json
-   (dex:post (format nil "~a~a:generateContent" *endpoint* *model*)
-             :headers `(("x-goog-api-key" . ,*api-key*)
-                        ("content-type" . "application/json"))
-             :content (shasht:write-json
-                       (obj "system_instruction"
-                            (obj "parts" (vector (obj "text" system-prompt)))
-                            "contents" (coerce contents 'vector)
-                            "tools" *tools*)
-                       nil))))
+  (http-post-json
+   (format nil "~a~a:generateContent" *endpoint* *model*)
+   `(("x-goog-api-key" . ,*api-key*)
+     ("content-type" . "application/json"))
+   (obj "system_instruction" (obj "parts" (vector (obj "text" system-prompt)))
+        "contents" (coerce contents 'vector)
+        "tools" *tools*)))
 
 ;;; --- the loop itself ----------------------------------------------------
 ;;; An agent is a recursive function over a growing list of messages.
@@ -117,9 +114,11 @@
 
 (defun list-models ()
   (unless *models*
-	(setf *models* (gethash "models" (shasht:read-json
-									  (dex:get (format nil "https://generativelanguage.googleapis.com/v1beta/models?key=~a" *api-key*)
-											   :headers '(("content-type" . "application/json"))))))))
+    (setf *models*
+            (gethash "models"
+                     (http-get-json
+                      (format nil "https://generativelanguage.googleapis.com/v1beta/models?key=~a" *api-key*)
+                      :headers '(("content-type" . "application/json")))))))
 
 (defun lm ()
   (list-models)

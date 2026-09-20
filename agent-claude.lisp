@@ -14,7 +14,7 @@
 ;;;;   (agent:forget)                   ; wipe the slate
 
 (defpackage :agent-claude
-  (:use :cl :utils :common)
+  (:use :cl :utils :http-utils :common)
   (:export #:run #:use #:forget #:list-models #:*models* #:lm #:llm #:set-model)
   (:nicknames :cd :claude))
 
@@ -51,19 +51,17 @@
 ;;; --- talking to the model ----------------------------------------------
 
 (defun call-model (messages)
-  (shasht:read-json
-   (dex:post *endpoint*
-             :headers `(("x-api-key" . ,*api-key*)
-                        ("anthropic-version" . ,*api-version*)
-                        ("content-type" . "application/json"))
-             :content (shasht:write-json
-                       (obj "model" *model*
-                            "max_tokens" *max-tokens*
-							"cache_control" (obj "type" "ephemeral")
-                            "system" system-prompt
-                            "messages" (coerce messages 'vector)
-                            "tools" *tools*)
-                       nil))))
+  (http-post-json
+   *endpoint*
+   `(("x-api-key" . ,*api-key*)
+     ("anthropic-version" . ,*api-version*)
+     ("content-type" . "application/json"))
+   (obj "model" *model*
+        "max_tokens" *max-tokens*
+        "cache_control" (obj "type" "ephemeral")
+        "system" system-prompt
+        "messages" (coerce messages 'vector)
+        "tools" *tools*)))
 
 ;;; --- the loop itself ----------------------------------------------------
 ;;; An agent is a recursive function over a growing list of messages.
@@ -118,11 +116,12 @@
 
 (defun list-models ()
   (unless *models*
-	(setf *models* (gethash "data" (shasht:read-json
-									(dex:get (format nil "https://api.anthropic.com/v1/models")
-											 :headers `(("content-type" . "application/json")
-														("anthropic-version" . ,*api-version*)
-														("X-Api-Key" . ,*api-key*))))))))
+    (setf *models*
+            (gethash "data"
+                     (http-get-json "https://api.anthropic.com/v1/models"
+                                    :headers `(("content-type" . "application/json")
+                                               ("anthropic-version" . ,*api-version*)
+                                               ("X-Api-Key" . ,*api-key*)))))))
 
 (defun lm ()
   (list-models)
