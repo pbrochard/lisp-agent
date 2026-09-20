@@ -67,15 +67,16 @@ almost everywhere truecolor might silently fail."
 ;; by name at call time instead, once everything is actually loaded.
 (defparameter *agent-packages* '("AGENT-CLAUDE" "AGENT-GEMINI" "AGENT-OLLAMA" "AGENT-CLAUDECODE" "AGENT-DEEPSEEK" "AGENT-MISTRAL" "AGENT-CHATGPT"))
 
-
 ;;; --- help ---------------------------------------------------------------
-;;; A short catalogue of the agents on the box. The aliases are read from
-;;; each package's own nickname list at call time, so adding a nickname to
-;;; an agent's DEFPACKAGE is enough to have it show up here.
+;;; A short catalogue of what you can type at the REPL: first the commands
+;;; common.lisp adds to every agent, then the agents themselves with the
+;;; aliases that select each one. The aliases are read from each package's
+;;; own nickname list at call time, so adding a nickname to an agent's
+;;; DEFPACKAGE is enough to have it show up here.
 
 (defparameter *agent-blurbs*
   '(("AGENT"            . "OpenRouter -- any model it front-ends")
-    ("AGENT-CLAUDE"     . "Anthropic API, straight" )
+    ("AGENT-CLAUDE"     . "Anthropic API, straight")
     ("AGENT-GEMINI"     . "Google Gemini API")
     ("AGENT-OLLAMA"     . "Local models via the Ollama server")
     ("AGENT-CLAUDECODE" . "Drives the `claude` CLI (subscription auth)")
@@ -93,21 +94,16 @@ almost everywhere truecolor might silently fail."
      ("np"   . "edit a fresh prompt, then run it")
      ("r"    . "alias of np"))
     ("Models"
-     ("lm"       . "list this agent's models, numbered")
-     ("llm"      . "list this agent's models with full details")
+     ("lm"        . "list this agent's models, numbered")
+     ("llm"       . "list this agent's models with full details")
      ("set-model" . "switch to model number N: (set-model 3)"))
     ("Session"
-     ("run"     . "send a prompt straight to the current agent: (run \"...\")")
-     ("use"     . "make this agent the current one and report its model")
-     ("forget"  . "wipe this agent's conversation memory"))
-    ("Memory"
-     ("recall"  . "the current conversation, as stored")
-     ("remember" . "replace the stored conversation with the list given")
-     ("forget-mem" . "delete one memory file (default: the current one)")
-     ("forget-all" . "wipe every agent's memory"))
+     ("run"    . "send a prompt straight to the current agent: (run \"...\")")
+     ("use"    . "make this agent the current one and report its model")
+     ("forget" . "wipe this agent's conversation memory"))
     ("Shell"
-     ("bash"  . "drop into a bash shell")
-     ("cd"    . "change directory: (cd \"/tmp\")")))
+     ("bash" . "drop into a bash shell")
+     ("cd"   . "change directory: (cd \"/tmp\")")))
   "REPL commands shared by every agent, grouped by what they are for.
 Each entry is (COMMAND . DESCRIPTION); COMMAND is the short name to type.")
 
@@ -146,9 +142,7 @@ silently dropped."
     (format t "    ~a~16t~a~%" (car entry) (cdr entry))))
 
 (defun print-commands ()
-  "Print every shared command, grouped. This is the interface common.lisp
-adds to each agent: the prompt helpers, and the run/model/memory verbs every
-agent exports."
+  "Print every shared command, grouped by what it is for."
   (format t "~&~a~%Commands:~%" SEP)
   (dolist (group *command-groups*)
     (print-command-group group)))
@@ -163,6 +157,7 @@ that select each one. Type a command at the REPL -- e.g. (r), (lm),
     (print-agent-help package-name))
   (format t "~a~%" SEP)
   (values))
+
 
 (defun forget-all ()
   "Calls FORGET in every agent package instead of duplicating each one's own
