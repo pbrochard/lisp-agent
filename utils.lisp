@@ -1,6 +1,6 @@
 (defpackage :utils
   (:use :cl)
-  (:export #:obj #:hash-table-keys #:hash-table-values #:obj-to-string #:lisp-eval #:run-lisp-eval-tool #:replace-all #:ref #:remove-prefix))
+  (:export #:obj #:hash-table-keys #:hash-table-values #:obj-to-string #:lisp-eval #:run-lisp-eval-tool #:lisp-eval-tool-name #:lisp-eval-tool-description #:lisp-eval-tool-parameters #:replace-all #:ref #:remove-prefix))
 
 (in-package :utils)
 
@@ -46,6 +46,31 @@
   (if (string= name "lisp-eval")
       (lisp-eval (gethash "form" args))
       (format nil "ERROR: unknown tool ~a" name)))
+
+
+;;; --- the lisp-eval tool, as advertised to the model ---------------------
+;;; Every agent exposes the same single tool. Its name, description and
+;;; JSON parameter schema are shared here; each agent wraps them in its
+;;; own provider-specific envelope ("function"/"parameters", Gemini's
+;;; "function_declarations", Claude's "input_schema", ...).
+
+(defun lisp-eval-tool-name ()
+  "The name the model calls to run Lisp."
+  "lisp-eval")
+
+(defun lisp-eval-tool-description ()
+  "What LISP-EVAL does, in words the model understands."
+  "Evaluate a Common Lisp form and return the printed result. Use this for computation, list manipulation, anything.")
+
+(defun lisp-eval-tool-parameters ()
+  "The JSON-schema object describing LISP-EVAL's single FORM argument."
+  (obj "type" "object"
+       "properties"
+       (obj "form"
+            (obj "type" "string"
+                 "description"
+                 "A single Common Lisp form, e.g. (reduce #'+ (loop for i from 1 to 100 collect i))"))
+       "required" (vector "form")))
 
 ;;; --- String helpers ----------------------------------------------------
 (defun replace-all (string part replacement)

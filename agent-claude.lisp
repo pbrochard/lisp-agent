@@ -34,13 +34,9 @@
 
 (defparameter *tools*
   (vector
-   (obj "name" "lisp-eval"
-        "description" "Evaluate a Common Lisp form and return the printed result. Use this for computation, list manipulation, anything."
-        "input_schema"
-        (obj "type" "object"
-             "properties" (obj "form" (obj "type" "string"
-                                           "description" "A single Common Lisp form, e.g. (reduce #'+ (loop for i from 1 to 100 collect i))"))
-             "required" (vector "form")))))
+   (obj "name" (lisp-eval-tool-name)
+        "description" (lisp-eval-tool-description)
+        "input_schema" (lisp-eval-tool-parameters))))
 
 (defun execute (tool-use)
   "Turn one tool_use block from the model into a tool_result block."

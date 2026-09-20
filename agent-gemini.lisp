@@ -34,13 +34,9 @@
   (vector
    (obj "function_declarations"
         (vector
-         (obj "name" "lisp-eval"
-              "description" "Evaluate a Common Lisp form and return the printed result. Use this for computation, list manipulation, anything."
-              "parameters"
-              (obj "type" "object"
-                   "properties" (obj "form" (obj "type" "string"
-                                                 "description" "A single Common Lisp form, e.g. (reduce #'+ (loop for i from 1 to 100 collect i))"))
-                   "required" (vector "form")))))))
+         (obj "name" (lisp-eval-tool-name)
+              "description" (lisp-eval-tool-description)
+              "parameters" (lisp-eval-tool-parameters))))))
 
 (defun execute (fn-call)
   "Turn one functionCall from the model into a functionResponse part."
