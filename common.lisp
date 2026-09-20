@@ -84,6 +84,36 @@ almost everywhere truecolor might silently fail."
     ("AGENT-CHATGPT"    . "OpenAI API"))
   "One line about what each agent talks to, keyed by package name.")
 
+(defparameter *command-groups*
+  '(("Prompts"
+     ("ep"   . "edit the pending prompt")
+     ("enp"  . "edit a fresh prompt (discard any pending one)")
+     ("rp"   . "run the pending prompt as it stands")
+     ("p"    . "edit the prompt, then run it")
+     ("np"   . "edit a fresh prompt, then run it")
+     ("r"    . "alias of np"))
+    ("Models"
+     ("lm"       . "list this agent's models, numbered")
+     ("llm"      . "list this agent's models with full details")
+     ("set-model" . "switch to model number N: (set-model 3)"))
+    ("Session"
+     ("run"     . "send a prompt straight to the current agent: (run \"...\")")
+     ("use"     . "make this agent the current one and report its model")
+     ("forget"  . "wipe this agent's conversation memory"))
+    ("Memory"
+     ("recall"  . "the current conversation, as stored")
+     ("remember" . "replace the stored conversation with the list given")
+     ("forget-mem" . "delete one memory file (default: the current one)")
+     ("forget-all" . "wipe every agent's memory"))
+    ("Shell"
+     ("bash"  . "drop into a bash shell")
+     ("cd"    . "change directory: (cd \"/tmp\")")))
+  "REPL commands shared by every agent, grouped by what they are for.
+Each entry is (COMMAND . DESCRIPTION); COMMAND is the short name to type.")
+
+;;; Some commands are aliases for the same function (R is NP, etc.), so the
+;;; catalogue shows the canonical names and notes the aliases in their
+;;; descriptions rather than listing a line for each spelling.
 (defun agent-aliases (package-name)
   "The nicknames of PACKAGE-NAME that name an agent to type at the REPL,
 sorted, or NIL when the package is not loaded. The package's full name is
@@ -109,11 +139,26 @@ silently dropped."
                (string-downcase package-name) aliases)
        (when blurb (format t "       ~a~%" blurb))))))
 
+(defun print-command-group (group)
+  "Print one GROUP: its heading, then each command and what it does."
+  (format t "~&~%  ~a:~%" (car group))
+  (dolist (entry (cdr group))
+    (format t "    ~a~16t~a~%" (car entry) (cdr entry))))
+
+(defun print-commands ()
+  "Print every shared command, grouped. This is the interface common.lisp
+adds to each agent: the prompt helpers, and the run/model/memory verbs every
+agent exports."
+  (format t "~&~a~%Commands:~%" SEP)
+  (dolist (group *command-groups*)
+    (print-command-group group)))
+
 (defun help ()
-  "List the agents available and the aliases that select each one.
-Type an alias at the REPL -- e.g. (cc), (claude), (g) -- to point the
-current session at that agent."
-  (format t "~&~a~%Agents (call an alias to switch):~%" SEP)
+  "List the shared commands, then the agents available and the aliases
+that select each one. Type a command at the REPL -- e.g. (r), (lm),
+(set-model 3) -- or an agent alias -- e.g. (cc), (claude), (g)."
+  (print-commands)
+  (format t "~&~%~a~%Agents (call an alias to switch):~%" SEP)
   (dolist (package-name (cons "AGENT" *agent-packages*))
     (print-agent-help package-name))
   (format t "~a~%" SEP)
