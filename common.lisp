@@ -2,7 +2,7 @@
   (:use :cl :utils :cl-ansi-text :uiop)
   (:export #:SYSTEM-PROMPT #:*CURRENT-RUN-FN* #:*current-model* #:*MEMORY-FILE* #:*SYSTEM-MESSAGE* #:SEP #:GREY #:RECALL
 		   #:REMEMBER #:FORGET-MEM #:FORGET-ALL #:BASH #:CD #:SET-STATUS #:STATUS-THINKING #:STATUS-OK #:print-model-ids #:model-id
-		   #:GET-PROMPT #:EP #:RP #:P #:ENP #:NP #:R)
+		   #:GET-PROMPT #:EP #:RP #:P #:ENP #:NP #:R #:HELP)
   (:nicknames :c :co))
 
 (in-package :common)
@@ -66,6 +66,58 @@ almost everywhere truecolor might silently fail."
 ;; package-qualified symbol at load time. FIND-PACKAGE/FIND-SYMBOL resolve
 ;; by name at call time instead, once everything is actually loaded.
 (defparameter *agent-packages* '("AGENT-CLAUDE" "AGENT-GEMINI" "AGENT-OLLAMA" "AGENT-CLAUDECODE" "AGENT-DEEPSEEK" "AGENT-MISTRAL" "AGENT-CHATGPT"))
+
+
+;;; --- help ---------------------------------------------------------------
+;;; A short catalogue of the agents on the box. The aliases are read from
+;;; each package's own nickname list at call time, so adding a nickname to
+;;; an agent's DEFPACKAGE is enough to have it show up here.
+
+(defparameter *agent-blurbs*
+  '(("AGENT"            . "OpenRouter -- any model it front-ends")
+    ("AGENT-CLAUDE"     . "Anthropic API, straight" )
+    ("AGENT-GEMINI"     . "Google Gemini API")
+    ("AGENT-OLLAMA"     . "Local models via the Ollama server")
+    ("AGENT-CLAUDECODE" . "Drives the `claude` CLI (subscription auth)")
+    ("AGENT-DEEPSEEK"   . "DeepSeek API")
+    ("AGENT-MISTRAL"    . "Mistral API")
+    ("AGENT-CHATGPT"    . "OpenAI API"))
+  "One line about what each agent talks to, keyed by package name.")
+
+(defun agent-aliases (package-name)
+  "The nicknames of PACKAGE-NAME that name an agent to type at the REPL,
+sorted, or NIL when the package is not loaded. The package's full name is
+excluded: it is shown separately, with the aliases listed under it."
+  (let ((package (find-package package-name)))
+    (when package
+      (sort (remove (string-downcase package-name)
+                    (mapcar #'string-downcase (package-nicknames package))
+                    :test #'string=)
+            #'string<))))
+
+(defun print-agent-help (package-name)
+  "Print one line for PACKAGE-NAME: its aliases, then the package's
+blurb. A package that is not loaded at all is noted rather than
+silently dropped."
+  (let ((aliases (agent-aliases package-name))
+        (blurb (cdr (assoc package-name *agent-blurbs* :test #'string=))))
+    (cond
+      ((null (find-package package-name))
+       (format t "~&  ?  ~a (not loaded)~%" package-name))
+      (t
+       (format t "~&  ~a~@[  (~{~a~^, ~})~]~%"
+               (string-downcase package-name) aliases)
+       (when blurb (format t "       ~a~%" blurb))))))
+
+(defun help ()
+  "List the agents available and the aliases that select each one.
+Type an alias at the REPL -- e.g. (cc), (claude), (g) -- to point the
+current session at that agent."
+  (format t "~&~a~%Agents (call an alias to switch):~%" SEP)
+  (dolist (package-name (cons "AGENT" *agent-packages*))
+    (print-agent-help package-name))
+  (format t "~a~%" SEP)
+  (values))
 
 (defun forget-all ()
   "Calls FORGET in every agent package instead of duplicating each one's own
