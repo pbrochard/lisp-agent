@@ -27,14 +27,6 @@
 
 (defconstant MEMORY-FILE "/agent/data/memory-agent.json")
 
-(defun ref (table &rest keys)
-  "Walk nested hash tables / vectors: (ref x \"choices\" 0 \"message\")"
-  (reduce (lambda (acc key)
-            (etypecase key
-              (string (gethash key acc))
-              (integer (aref acc key))))
-          keys :initial-value table))
-
 ;;; --- the tool: a Lisp REPL ---------------------------------------------
 
 (defparameter *tools*
