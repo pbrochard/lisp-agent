@@ -147,19 +147,6 @@ silently dropped."
   (dolist (group *command-groups*)
     (print-command-group group)))
 
-(defun help ()
-  "List the shared commands, then the agents available with the aliases
-that select each one and any commands an agent adds of its own. Type a
-command at the REPL -- e.g. (r), (lm), (set-model 3) -- or an agent
-alias -- e.g. (cc), (claude), (g)."
-  (print-commands)
-  (format t "~&~%~a~%Agents (call an alias to switch):~%" SEP)
-  (dolist (package-name (cons "AGENT" *agent-packages*))
-    (print-agent-help package-name)
-    (print-agent-extras package-name))
-  (format t "~a~%" SEP)
-  (values))
-
 ;;; Every agent exports the shared verbs above; a few export more of their
 ;;; own (only agent-claudecode so far). Those are read from the package's
 ;;; exports at call time -- minus the shared set -- so nothing here needs
@@ -214,6 +201,19 @@ none: most agents are exactly the shared interface."
         (let ((blurb (cdr (assoc (string-upcase name)
                                  *agent-command-blurbs* :test #'string=))))
           (format t "    ~a~@[~20t~a~]~%" name blurb))))))
+
+(defun help ()
+  "List the shared commands, then the agents available with the aliases
+that select each one and any commands an agent adds of its own. Type a
+command at the REPL -- e.g. (r), (lm), (set-model 3) -- or an agent
+alias -- e.g. (cc), (claude), (g)."
+  (print-commands)
+  (format t "~&~%~a~%Agents (call an alias to switch):~%" SEP)
+  (dolist (package-name (cons "AGENT" *agent-packages*))
+    (print-agent-help package-name)
+    (print-agent-extras package-name))
+  (format t "~a~%" SEP)
+  (values))
 
 (defun forget-all ()
   "Calls FORGET in every agent package instead of duplicating each one's own
