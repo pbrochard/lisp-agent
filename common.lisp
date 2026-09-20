@@ -96,11 +96,11 @@ says which agent it came up on. Returns the package now current."
   (let* ((package (or (recall-agent) (find-package default)))
          (use (and package (find-symbol "USE" package))))
     (if (and use (fboundp use))
-        (progn (format t "~&~a ~a~%" (grey (string-downcase (package-name package))) (funcall use))
+        (progn (format t "~&~a~%~a ~a~%" SEP (grey (string-downcase (package-name package))) (funcall use))
                package)
         (let ((fallback (find-symbol "USE" (find-package default))))
           (warn "No usable agent recorded; falling back to ~a." default)
-          (format t "~&~a ~a~%" (grey (string-downcase default)) (funcall fallback))
+          (format t "~&~a~%~a ~a~%" SEP (grey (string-downcase default)) (funcall fallback))
           (find-package default)))))
 
 ;; Package names, not literal SYMBOL-QUALIFIED::NAMES: common.lisp loads
