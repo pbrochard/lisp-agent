@@ -148,16 +148,72 @@ silently dropped."
     (print-command-group group)))
 
 (defun help ()
-  "List the shared commands, then the agents available and the aliases
-that select each one. Type a command at the REPL -- e.g. (r), (lm),
-(set-model 3) -- or an agent alias -- e.g. (cc), (claude), (g)."
+  "List the shared commands, then the agents available with the aliases
+that select each one and any commands an agent adds of its own. Type a
+command at the REPL -- e.g. (r), (lm), (set-model 3) -- or an agent
+alias -- e.g. (cc), (claude), (g)."
   (print-commands)
   (format t "~&~%~a~%Agents (call an alias to switch):~%" SEP)
   (dolist (package-name (cons "AGENT" *agent-packages*))
-    (print-agent-help package-name))
+    (print-agent-help package-name)
+    (print-agent-extras package-name))
   (format t "~a~%" SEP)
   (values))
 
+;;; Every agent exports the shared verbs above; a few export more of their
+;;; own (only agent-claudecode so far). Those are read from the package's
+;;; exports at call time -- minus the shared set -- so nothing here needs
+;;; updating when an agent gains a command.
+
+(defparameter *shared-exports*
+  '("RUN" "USE" "FORGET" "LM" "LLM" "SET-MODEL" "LIST-MODELS")
+  "The verbs every agent exports; a command in this list is common
+interface, not an agent's own, and so is left out of its extras.")
+
+(defparameter *agent-command-blurbs*
+  '(("LE"            . "list this agent's effort levels, numbered")
+    ("LIST-EFFORTS"  . "as LE, but in full")
+    ("SET-EFFORT"    . "switch to effort number N: (set-effort 3)")
+    ("SET-TIMEZONE"  . "zone usage reset times show in: (set-timezone \"Asia/Tokyo\")")
+    ("VERBOSE"       . "toggle the live tool trace")
+    ("SET-VERBOSE"   . "turn the live tool trace on or off")
+    ("USAGE"        . "report this session's rate-limit windows and cost"))
+  "One line about an agent's own command, keyed by exported symbol name.")
+
+(defun variable-name-p (name)
+  "True for a symbol name that names a variable -- *FOO* or +FOO+ -- rather
+than a function to call. Those are exported alongside an agent's commands but
+are not things to type on their own, so HELP leaves them out."
+(let ((n (length name)))
+  (and (> n 1)
+       (let ((first (char name 0)) (last (char name (1- n))))
+         (or (and (char= first #\*) (char= last #\*))
+             (and (char= first #\+) (char= last #\+)))))))
+
+(defun agent-extras (package-name)
+  "The symbols PACKAGE-NAME exports beyond the shared set, sorted, as
+lower-case strings -- the commands this agent has and the others do not."
+  (let ((package (find-package package-name)))
+    (when package
+      (sort (set-difference
+             (loop for s being the external-symbols of package
+                   for name = (symbol-name s)
+                   unless (or (member name *shared-exports* :test #'string=)
+                              (variable-name-p name))
+                     collect (string-downcase name))
+             *shared-exports* :test #'string=)
+            #'string<))))
+
+(defun print-agent-extras (package-name)
+  "Print PACKAGE-NAME's own commands, one per line. Silence when it has
+none: most agents are exactly the shared interface."
+  (let ((extras (agent-extras package-name)))
+    (when extras
+      (format t "~&~%  ~a:~%" (string-downcase package-name))
+      (dolist (name extras)
+        (let ((blurb (cdr (assoc (string-upcase name)
+                                 *agent-command-blurbs* :test #'string=))))
+          (format t "    ~a~@[~20t~a~]~%" name blurb))))))
 
 (defun forget-all ()
   "Calls FORGET in every agent package instead of duplicating each one's own
