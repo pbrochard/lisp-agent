@@ -40,7 +40,7 @@
 (in-package :agent-claudecode)
 
 (defparameter *claude-bin* "claude")
-(defparameter *model* "opus")
+(defparameter *model* "sonnet")
 (defparameter *permission-mode* "bypassPermissions")
 
 ;;; The CLI rides subscription auth and has no models endpoint to ask, so the
