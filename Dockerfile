@@ -46,7 +46,8 @@ USER agentuser
 COPY prepare-sbcl.sh .
 RUN ./prepare-sbcl.sh
 
-COPY load.lisp utils.lisp common.lisp agent.lisp agent-gemini.lisp agent-claude.lisp agent-claudecode.lisp agent-ollama.lisp agent-deepseek.lisp .
+COPY load.lisp utils.lisp common.lisp agent.lisp agent-gemini.lisp agent-claude.lisp agent-claudecode.lisp \
+	agent-ollama.lisp agent-deepseek.lisp agent-chatgpt.lisp .
 COPY agent-run.sh .
 
 COPY skills/ ./skills/
