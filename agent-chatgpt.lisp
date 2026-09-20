@@ -21,7 +21,7 @@
 (in-package :agent-chatgpt)
 
 (defparameter *endpoint* "https://api.openai.com/v1/chat/completions")
-(defparameter *model* "gpt-4o")
+(defparameter *model* "gpt-5.5")
 (defparameter *api-key* (uiop:getenv "API_KEY_OPENAI"))
 
 (defparameter *models* nil)
