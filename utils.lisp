@@ -1,6 +1,6 @@
 (defpackage :utils
   (:use :cl)
-  (:export #:obj #:hash-table-keys #:hash-table-values #:obj-to-string #:lisp-eval #:replace-all #:remove-prefix))
+  (:export #:obj #:hash-table-keys #:hash-table-values #:obj-to-string #:lisp-eval #:replace-all #:ref #:remove-prefix))
 
 (in-package :utils)
 
@@ -54,3 +54,17 @@
              (string= prefix string :end2 len-p))
         (subseq string len-p) ; Return string starting after the prefix
         string)))             ; Return the original string untouched
+
+;;; --- nested access helper ----------------------------------------------
+;;; Walk nested hash tables / vectors. shasht reads JSON objects as hash
+;;; tables and arrays as vectors; REF handles a mix of string keys
+;;; (hash lookups) and integer indices (vector lookups).
+;;;   (ref x "choices" 0 "message")   ; Gemini: (ref x "candidates" 0 "content")
+
+(defun ref (table &rest keys)
+  "Walk nested hash tables / vectors: (ref x \"choices\" 0 \"message\")"
+  (reduce (lambda (acc key)
+            (etypecase key
+              (string (gethash key acc))
+              (integer (aref acc key))))
+          keys :initial-value table))

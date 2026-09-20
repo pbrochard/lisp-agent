@@ -29,14 +29,6 @@
 
 (defconstant MEMORY-FILE "/agent/data/memory-gemini.json")
 
-(defun ref (table &rest keys)
-  "Walk nested hash tables / vectors: (ref x \"candidates\" 0 \"content\")"
-  (reduce (lambda (acc key)
-            (etypecase key
-              (string (gethash key acc))
-              (integer (aref acc key))))
-          keys :initial-value table))
-
 ;;; --- the tool: a Lisp REPL ---------------------------------------------
 (defparameter *tools*
   (vector
