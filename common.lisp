@@ -90,16 +90,18 @@ takes a nickname too, so a file hand-edited to \"cc\" still resolves."
 
 (defun use-recorded-agent (&optional (default "AGENT-CLAUDECODE"))
   "Select the agent last chosen with USE, falling back to DEFAULT (by name)
-when nothing is recorded or the recorded one is gone. Returns the package
-now current. Called by LOAD.LISP in place of a hard-coded agent:use."
+when nothing is recorded or the recorded one is gone. Print the agent
+that ends up current, with the model USE returned, so a fresh load
+says which agent it came up on. Returns the package now current."
   (let* ((package (or (recall-agent) (find-package default)))
          (use (and package (find-symbol "USE" package))))
-    (cond
-      ((and use (fboundp use)) (funcall use) package)
-      (t (let ((fallback (find-symbol "USE" (find-package default))))
-           (warn "No usable agent recorded; falling back to ~a." default)
-           (funcall fallback)
-           (find-package default))))))
+    (if (and use (fboundp use))
+        (progn (format t "~&~a ~a~%" (grey (string-downcase (package-name package))) (funcall use))
+               package)
+        (let ((fallback (find-symbol "USE" (find-package default))))
+          (warn "No usable agent recorded; falling back to ~a." default)
+          (format t "~&~a ~a~%" (grey (string-downcase default)) (funcall fallback))
+          (find-package default)))))
 
 ;; Package names, not literal SYMBOL-QUALIFIED::NAMES: common.lisp loads
 ;; before any agent package exists, so the reader would choke on a
