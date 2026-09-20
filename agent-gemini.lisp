@@ -122,13 +122,8 @@
 
 (defun lm ()
   (list-models)
-  (loop for p across *models*
-		for index from 1
-		do
-		   (maphash (lambda (k v)
-					  (when (string-equal k "name")
-						(format t "~&[~a] ~a~%" index (remove-prefix v "models/"))))
-					p)))
+  (print-model-ids *models* :id-key "name"
+                         :id-fn (lambda (s) (remove-prefix s "models/"))))
 
 (defun llm ()
   (list-models)
@@ -145,5 +140,6 @@
 
 (defun set-model (num)
   (list-models)
-  (setf *model* (remove-prefix (gethash "name" (aref *models* (- num 1))) "models/"))
+  (setf *model* (model-id *models* num :id-key "name"
+                          :id-fn (lambda (s) (remove-prefix s "models/"))))
   (use))

@@ -1,7 +1,7 @@
 (defpackage :common
   (:use :cl :utils :cl-ansi-text :uiop)
   (:export #:SYSTEM-PROMPT #:*CURRENT-RUN-FN* #:*current-model* #:*MEMORY-FILE* #:*SYSTEM-MESSAGE* #:SEP #:GREY #:RECALL
-		   #:REMEMBER #:FORGET-MEM #:FORGET-ALL #:BASH #:CD #:SET-STATUS #:STATUS-THINKING #:STATUS-OK
+		   #:REMEMBER #:FORGET-MEM #:FORGET-ALL #:BASH #:CD #:SET-STATUS #:STATUS-THINKING #:STATUS-OK #:print-model-ids #:model-id
 		   #:GET-PROMPT #:EP #:RP #:P #:ENP #:NP #:R)
   (:nicknames :c :co))
 
@@ -172,3 +172,19 @@ agent-claudecode's own session file alongside its memory."
 (defalias np edit-run-new-prompt)
 (defalias r edit-run-new-prompt)
 
+
+;;; --- model pickers -----------------------------------------------------
+;;; The list/lm/set-model trio is per-provider only in how a model entry
+;;; exposes its id: OpenAI-style agents use the "id" field, Gemini uses
+;;; "name" (with a "models/" prefix to strip).  These two helpers take
+;;; that accessor as arguments; each agent keeps its own LIST-MODELS.
+
+(defun print-model-ids (models &key (id-key "id") (id-fn #'identity))
+  "Print \"[n] id\" for each model in MODELS (a vector of JSON objects)."
+  (loop for m across models
+        for index from 1
+        do (format t "~&[~a] ~a~%" index (funcall id-fn (gethash id-key m)))))
+
+(defun model-id (models num &key (id-key "id") (id-fn #'identity))
+  "Return the id of the NUM-th (1-based) model in MODELS."
+  (funcall id-fn (gethash id-key (aref models (1- num)))))

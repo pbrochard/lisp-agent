@@ -125,13 +125,7 @@
 
 (defun lm ()
   (list-models)
-  (loop for p across *models*
-  		for index from 1
-  		do
-  		   (maphash (lambda (k v)
-  					  (when (string-equal k "id")
-  						(format t "~&[~a] ~a~%" index v)))
-  					p)))
+  (print-model-ids *models*))
 
 (defun llm ()
   (list-models)
@@ -150,5 +144,5 @@
 
 (defun set-model (num)
   (list-models)
-  (setf *model* (gethash "id" (aref *models* (- num 1))))
+  (setf *model* (model-id *models* num))
   (use))
