@@ -137,7 +137,7 @@ silently dropped."
 
 (defun print-command-group (group)
   "Print one GROUP: its heading, then each command and what it does."
-  (format t "~&~%  ~a:~%" (car group))
+  (format t "~&  ~a:~%" (car group))
   (dolist (entry (cdr group))
     (format t "    ~a~16t~a~%" (car entry) (cdr entry))))
 
@@ -196,11 +196,12 @@ lower-case strings -- the commands this agent has and the others do not."
 none: most agents are exactly the shared interface."
   (let ((extras (agent-extras package-name)))
     (when extras
-      (format t "~&~%  ~a:~%" (string-downcase package-name))
+      ;;(format t "~&~%  ~a:~%" (string-downcase package-name))
+	  (format t "     Extra commands:~%")
       (dolist (name extras)
         (let ((blurb (cdr (assoc (string-upcase name)
                                  *agent-command-blurbs* :test #'string=))))
-          (format t "    ~a~@[~20t~a~]~%" name blurb))))))
+          (format t "       ~a~@[~20t~a~]~%" name blurb))))))
 
 (defun help ()
   "List the shared commands, then the agents available with the aliases
