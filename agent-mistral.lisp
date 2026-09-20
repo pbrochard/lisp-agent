@@ -14,7 +14,7 @@
 ;;;;   (mistral:forget)                   ; wipe the slate
 
 (defpackage :agent-mistral
-  (:use :cl :utils :common)
+  (:use :cl :utils :openai-utils :common)
   (:export #:run #:use #:forget #:list-models #:*models* #:lm #:llm #:set-model)
   (:nicknames :mi :mistral))
 
@@ -41,16 +41,6 @@
                   "properties" (obj "form" (obj "type" "string"
                                                 "description" "A single Common Lisp form, e.g. (reduce #\'+ (loop for i from 1 to 100 collect i))"))
                   "required" (vector "form"))))))
-
-(defun execute (tool-call)
-  "Turn one tool_call from the model into a tool-result message."
-  (let* ((name (ref tool-call "function" "name"))
-         (args (shasht:read-json (ref tool-call "function" "arguments")))
-         (result (run-lisp-eval-tool name args)))
-    (format t "~&  => ~a || ~a~%" (gethash "form" args) result)
-    (obj "role" "tool"
-         "tool_call_id" (gethash "id" tool-call)
-         "content" result)))
 
 ;;; --- talking to the model ----------------------------------------------
 
