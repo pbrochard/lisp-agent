@@ -8,6 +8,8 @@
 (load "agent-claudecode.lisp")
 (load "agent-ollama.lisp")
 (load "agent-deepseek.lisp")
+(load "agent-mistral.lisp")
 (load "agent-chatgpt.lisp")
 
 (claudecode:use)
+

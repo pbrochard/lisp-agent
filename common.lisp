@@ -64,7 +64,7 @@ almost everywhere truecolor might silently fail."
 ;; before any agent package exists, so the reader would choke on a
 ;; package-qualified symbol at load time. FIND-PACKAGE/FIND-SYMBOL resolve
 ;; by name at call time instead, once everything is actually loaded.
-(defparameter *agent-packages* '("AGENT-CLAUDE" "AGENT-GEMINI" "AGENT-OLLAMA" "AGENT-CLAUDECODE" "AGENT-DEEPSEEK" "AGENT-CHATGPT"))
+(defparameter *agent-packages* '("AGENT-CLAUDE" "AGENT-GEMINI" "AGENT-OLLAMA" "AGENT-CLAUDECODE" "AGENT-DEEPSEEK" "AGENT-MISTRAL" "AGENT-CHATGPT"))
 
 (defun forget-all ()
   "Calls FORGET in every agent package instead of duplicating each one's own
