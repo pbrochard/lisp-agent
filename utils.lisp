@@ -1,6 +1,6 @@
 (defpackage :utils
   (:use :cl)
-  (:export #:obj #:hash-table-keys #:hash-table-values #:obj-to-string #:lisp-eval #:replace-all #:ref #:remove-prefix))
+  (:export #:obj #:hash-table-keys #:hash-table-values #:obj-to-string #:lisp-eval #:run-lisp-eval-tool #:replace-all #:ref #:remove-prefix))
 
 (in-package :utils)
 
@@ -34,6 +34,18 @@
   (handler-case
       (format nil "~s" (eval (read-from-string form-string)))
     (error (e) (format nil "ERROR: ~a" e))))
+
+
+;;; --- the tool, shared across agents ------------------------------------
+;;; Each provider's EXECUTE extracts the tool name and args differently,
+;;; but they all dispatch to the same LISP-EVAL tool. This is that common
+;;; core: NAME is the requested tool, ARGS a hash-table of its arguments.
+
+(defun run-lisp-eval-tool (name args)
+  "Dispatch one tool call to LISP-EVAL; return its printed result."
+  (if (string= name "lisp-eval")
+      (lisp-eval (gethash "form" args))
+      (format nil "ERROR: unknown tool ~a" name)))
 
 ;;; --- String helpers ----------------------------------------------------
 (defun replace-all (string part replacement)

@@ -46,9 +46,7 @@
   "Turn one tool_use block from the model into a tool_result block."
   (let* ((name (gethash "name" tool-use))
          (args (gethash "input" tool-use))
-         (result (if (string= name "lisp-eval")
-                     (lisp-eval (gethash "form" args))
-                     (format nil "ERROR: unknown tool ~a" name))))
+         (result (run-lisp-eval-tool name args)))
     (format t "~&  ⤷ ~a => ~a~%" (gethash "form" args) result)
     (obj "type" "tool_result"
          "tool_use_id" (gethash "id" tool-use)

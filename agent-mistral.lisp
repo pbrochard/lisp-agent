@@ -46,9 +46,7 @@
   "Turn one tool_call from the model into a tool-result message."
   (let* ((name (ref tool-call "function" "name"))
          (args (shasht:read-json (ref tool-call "function" "arguments")))
-         (result (if (string= name "lisp-eval")
-                     (lisp-eval (gethash "form" args))
-                     (format nil "ERROR: unknown tool ~a" name))))
+         (result (run-lisp-eval-tool name args)))
     (format t "~&  => ~a || ~a~%" (gethash "form" args) result)
     (obj "role" "tool"
          "tool_call_id" (gethash "id" tool-call)

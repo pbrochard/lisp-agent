@@ -46,9 +46,7 @@
   (let* ((fn (gethash "function" tool-call))
          (name (gethash "name" fn))
          (args (gethash "arguments" fn))
-         (result (if (string= name "lisp-eval")
-                     (lisp-eval (gethash "form" args))
-                     (format nil "ERROR: unknown tool ~a" name))))
+         (result (run-lisp-eval-tool name args)))
     (format t "~&  ⤷ ~a => ~a~%" (gethash "form" args) result)
     (obj "role" "tool"
          "tool_name" name
