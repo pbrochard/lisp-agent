@@ -6,7 +6,7 @@ API_KEY_OPENROUTER=$(gpg -d ~/.authinfo.gpg 2> /dev/null | awk '/^machine openro
 API_KEY_DEEPSEEK=$(gpg -d ~/.authinfo.gpg 2> /dev/null | awk '/^machine api.deepseek.com/ {print $6}')
 # Long-lived token from `claude setup-token`, for agent-claudecode.lisp (subscription auth, no API key).
 CLAUDE_CODE_OAUTH_TOKEN=$(gpg -d ~/.authinfo.gpg 2> /dev/null | awk '/^machine claude-code/ {print $6}')
-API_KEY_OPENAI=$(gpg -d ~/.authinfo.gpg 2> /dev/null | awk '/^machine openai/ {print $6}')
+API_KEY_OPENAI=$(gpg -d ~/.authinfo.gpg 2> /dev/null | awk '/^machine api.openai.com/ {print $6}')
 
 # --network=host \
 
