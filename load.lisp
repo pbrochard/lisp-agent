@@ -7,5 +7,6 @@
 (load "agent-claude.lisp")
 (load "agent-claudecode.lisp")
 (load "agent-ollama.lisp")
+(load "agent-deepseek.lisp")
 
 (claudecode:use)
