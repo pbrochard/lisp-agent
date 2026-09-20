@@ -113,8 +113,7 @@
   *model*)
 
 (defun forget ()
-  (let ((*memory-file* (pathname MEMORY-FILE)))
-	(forget-mem)))
+  (forget-mem MEMORY-FILE))
 
 (defun list-models ()
   (unless *models*

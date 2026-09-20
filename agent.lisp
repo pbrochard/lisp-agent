@@ -105,5 +105,4 @@ The answer is just (gethash \"content\" (car (last messages)))."
   *model*)
 
 (defun forget ()
-  (let ((*memory-file* (pathname MEMORY-FILE)))
-	(forget-mem)))
+  (forget-mem MEMORY-FILE))

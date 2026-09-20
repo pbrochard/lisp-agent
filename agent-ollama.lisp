@@ -80,10 +80,6 @@
                             (map 'list #'execute tool-calls)))
         (append messages (list message)))))
 
-(defun forget ()
-  (let ((*memory-file* (pathname MEMORY-FILE)))
-	(forget-mem)))
-
 ;;; --- entry point ------------------------------------------------------------
 
 (defun final-text (message)
@@ -111,5 +107,4 @@
   *model*)
 
 (defun forget ()
-  (let ((*memory-file* (pathname MEMORY-FILE)))
-	(forget-mem)))
+  (forget-mem MEMORY-FILE))

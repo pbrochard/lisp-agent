@@ -912,8 +912,7 @@ carries no rate-limit payload of its own, hence *LAST-RATE-LIMIT*."
   *model*)
 
 (defun forget ()
-  (let ((*memory-file* (pathname MEMORY-FILE)))
-    (forget-mem))
+  (forget-mem MEMORY-FILE)
   (when (probe-file SESSION-FILE) (delete-file SESSION-FILE)))
 
 (defun list-models ()

@@ -56,9 +56,10 @@ almost everywhere truecolor might silently fail."
       (coerce (with-open-file (in *memory-file*) (shasht:read-json in)) 'list)
       *system-message*))
 
-(defun forget-mem ()
-  (when (probe-file *memory-file*) (delete-file *memory-file*))
-  (format t "~&Memory wiped: ~a.~%~a~%" *memory-file* SEP))
+(defun forget-mem (&optional (memory-file *memory-file*))
+  (let ((memory-file (pathname memory-file)))
+    (when (probe-file memory-file) (delete-file memory-file))
+    (format t "~&Memory wiped: ~a.~%~a~%" memory-file SEP)))
 
 ;; Package names, not literal SYMBOL-QUALIFIED::NAMES: common.lisp loads
 ;; before any agent package exists, so the reader would choke on a
