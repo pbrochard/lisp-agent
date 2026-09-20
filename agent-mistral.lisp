@@ -86,7 +86,7 @@
   "Returns the complete message history, final answer included."
   (let* ((message (ref (call-model messages) "choices" 0 "message"))
          (tool-calls (gethash "tool_calls" message)))
-    (if (and tool-calls (plusp (length tool-calls)))
+    (if (and tool-calls (not (eq tool-calls :null)) (plusp (length tool-calls)))
         (agent-loop (append messages
                             (list message)
                             (map 'list #'execute tool-calls)))
