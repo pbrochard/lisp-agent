@@ -108,6 +108,7 @@
 		*current-model* *model*
 		*memory-file* (pathname MEMORY-FILE)
 		*system-message* '())
+  (remember-agent "AGENT-CLAUDE")
   (set-status STATUS-OK)
   *model*)
 

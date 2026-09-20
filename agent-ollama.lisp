@@ -100,6 +100,7 @@
 		*current-model* *model*
 		*memory-file* (pathname MEMORY-FILE)
 		*system-message* '())
+  (remember-agent "AGENT-OLLAMA")
   (set-status STATUS-OK)
   *model*)
 

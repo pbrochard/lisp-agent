@@ -13,5 +13,6 @@
 (load "agent-mistral.lisp")
 (load "agent-chatgpt.lisp")
 
-(claudecode:use)
+;; Come back up on the agent last selected with USE, or claudecode
+(common:use-recorded-agent)
 

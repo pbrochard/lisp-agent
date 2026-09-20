@@ -2,7 +2,7 @@
   (:use :cl :utils :cl-ansi-text :uiop)
   (:export #:SYSTEM-PROMPT #:*CURRENT-RUN-FN* #:*current-model* #:*MEMORY-FILE* #:*SYSTEM-MESSAGE* #:SEP #:GREY #:RECALL
 		   #:REMEMBER #:FORGET-MEM #:FORGET-ALL #:BASH #:CD #:SET-STATUS #:STATUS-THINKING #:STATUS-OK #:print-model-ids #:model-id
-		   #:GET-PROMPT #:EP #:RP #:P #:ENP #:NP #:R #:HELP)
+		   #:GET-PROMPT #:EP #:RP #:P #:ENP #:NP #:R #:HELP #:REMEMBER-AGENT #:RECALL-AGENT #:USE-RECORDED-AGENT)
   (:nicknames :c :co))
 
 (in-package :common)
@@ -60,6 +60,46 @@ almost everywhere truecolor might silently fail."
   (let ((memory-file (pathname memory-file)))
     (when (probe-file memory-file) (delete-file memory-file))
     (format t "~&Memory wiped: ~a.~%~a~%" memory-file SEP)))
+
+;;; --- current agent ---------------------------------------------------------
+;;; Which agent USE last selected is remembered across processes, so a fresh
+;;; LOAD.LISP comes back up on the agent you were just talking to instead of
+;;; a hard-coded one. Only the package name is written: the agent's own USE
+;;; rebuilds everything else (run function, model, memory file) on the way
+;;; back in, so nothing but a name needs to survive.
+
+(defparameter *agent-file*
+  (pathname (or (uiop:getenv "AGENT_STATE") "/agent/data/agent"))
+  "Where the name of the last agent selected with USE is kept.")
+
+(defun remember-agent (package-name)
+  "Record PACKAGE-NAME as the current agent. Called by each agent's USE."
+  (with-open-file (out *agent-file* :direction :output :if-exists :supersede
+                                   :if-does-not-exist :create)
+    (format out "~a~%" package-name)))
+
+(defun recall-agent ()
+  "The package of the last agent selected, or NIL when none was ever
+recorded (or the recorded name no longer names a package). FIND-PACKAGE
+takes a nickname too, so a file hand-edited to \"cc\" still resolves."
+  (when (probe-file *agent-file*)
+    (with-open-file (in *agent-file*)
+      (let ((name (string-trim '(#\Space #\Tab #\Newline)
+                               (read-line in nil ""))))
+        (and (plusp (length name)) (find-package name))))))
+
+(defun use-recorded-agent (&optional (default "AGENT-CLAUDECODE"))
+  "Select the agent last chosen with USE, falling back to DEFAULT (by name)
+when nothing is recorded or the recorded one is gone. Returns the package
+now current. Called by LOAD.LISP in place of a hard-coded agent:use."
+  (let* ((package (or (recall-agent) (find-package default)))
+         (use (and package (find-symbol "USE" package))))
+    (cond
+      ((and use (fboundp use)) (funcall use) package)
+      (t (let ((fallback (find-symbol "USE" (find-package default))))
+           (warn "No usable agent recorded; falling back to ~a." default)
+           (funcall fallback)
+           (find-package default))))))
 
 ;; Package names, not literal SYMBOL-QUALIFIED::NAMES: common.lisp loads
 ;; before any agent package exists, so the reader would choke on a

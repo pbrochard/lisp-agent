@@ -908,6 +908,7 @@ carries no rate-limit payload of its own, hence *LAST-RATE-LIMIT*."
         *current-model* *model*
         *memory-file* (pathname MEMORY-FILE)
         *system-message* '())
+  (remember-agent "AGENT-CLAUDECODE")
   (set-status STATUS-OK)
   *model*)
 

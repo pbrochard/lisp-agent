@@ -99,6 +99,7 @@ The answer is just (gethash \"content\" (car (last messages)))."
 		*memory-file* (pathname MEMORY-FILE)
 		*system-message* (list (obj "role" "system"
 									"content" SYSTEM-PROMPT)))
+  (remember-agent "AGENT")
   (set-status STATUS-OK)
   *model*)
 
