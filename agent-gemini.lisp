@@ -15,7 +15,7 @@
 
 (defpackage :agent-gemini
   (:use :cl :utils :http-utils :common)
-  (:export #:run #:use #:forget #:list-models :*models* #:lm #:llm #:set-model)
+  (:export #:run #:use #:forget #:list-models :*models* #:lm #:llm #:set-model #:usage)
   (:nicknames :g :gm :gem :gemini))
 
 (in-package :agent-gemini)
@@ -26,6 +26,10 @@
 (defparameter *api-key* (uiop:getenv "API_KEY_GEMINI"))
 
 (defparameter *models* nil)
+
+(defparameter *last-usage* nil
+  "The token usage the last model call reported, kept so USAGE can show
+what a turn cost. NIL until a call has been made.")
 
 (defconstant MEMORY-FILE "/agent/data/memory-gemini.json")
 
@@ -67,10 +71,12 @@
 
 (defun agent-loop (contents)
   "Returns the complete contents history, final answer included."
-  (let* ((message (ref (call-model contents) "candidates" 0 "content"))
+  (let* ((response (call-model contents))
+         (message (ref response "candidates" 0 "content"))
          (calls (loop for p across (gethash "parts" message)
                       for fc = (gethash "functionCall" p)
                       when fc collect fc)))
+    (setf *last-usage* (gethash "usageMetadata" response))
     (if calls
         (agent-loop (append contents
                             (list message)
@@ -90,6 +96,48 @@
 
 (defun use () nil)
 
+;;; --- usage & token reporting ------------------------------------------
+;;; Gemini reports a call's token counts in USAGE-METADATA (camelCase fields,
+;;; unlike OpenAI's usage object): promptTokenCount in, candidatesTokenCount
+;;; out, thoughtsTokenCount for the thinking budget, totalTokenCount over all.
+;;; An API key cannot read Gemini billing, so there is no account balance to
+;;; report the way DeepSeek and OpenAI allow -- only what a call cost.
+
+(defun format-gemini-tokens (metadata)
+  "USAGE-METADATA as one readable line, or NIL when there is nothing to show.
+The style matches openai-utils:FORMAT-USAGE-TOKENS so a run reads the same
+whichever agent ran it. A count Gemini left out is not printed rather than
+shown as zero."
+  (when metadata
+    (let ((input (gethash "promptTokenCount" metadata))
+          (output (gethash "candidatesTokenCount" metadata))
+          (total (gethash "totalTokenCount" metadata))
+          (thoughts (gethash "thoughtsTokenCount" metadata)))
+      (with-output-to-string (s)
+        (write-string "Tokens:" s)
+        (when input  (format s " ~a in" input))
+        (when output (format s "~:[, ~; ~]~a out" (not input) output))
+        (when (and total (/= total (or output 0))) (format s " (~a total)" total))
+        (when (and thoughts (plusp thoughts)) (format s ", ~a reasoning" thoughts))))))
+
+(defun print-gemini-tokens (metadata)
+  "Print FORMAT-GEMINI-TOKENS of METADATA, silent when there is nothing to say."
+  (let ((line (format-gemini-tokens metadata)))
+    (when line (format t "~&~a~%" line))))
+
+(defun usage (&optional date)
+  "Report usage. The last model call's token counts come first, when there was
+one -- what that turn cost. Gemini exposes no account balance or usage over
+the API for an API key, so there is no GET-USAGE report to add the way the
+OpenAI-compatible agents do. DATE is accepted so (usage) is uniform across
+agents and ignored."
+  (declare (ignore date))
+  (let ((line (format-gemini-tokens *last-usage*)))
+    (if line
+        (format t "~&~a~%" (grey line))
+        (format t "~&No model call yet in this session.~%"))
+    (format t "~&~a~%" (grey "Gemini exposes no account balance or usage over the API."))))
+
 (defun run (prompt)
   (use)
   (set-status STATUS-THINKING)
@@ -98,7 +146,10 @@
                    (append (recall)
                            (list (obj "role" "user"
                                       "parts" (vector (obj "text" prompt)))))))))
-    (format t "~&______~&~%~a~%~a ~a~%" (final-text (car (last history))) SEP (grey *model*))
+    (format t "~&______~&~%~a~%" (final-text (car (last history))))
+    (let ((tokens (format-gemini-tokens *last-usage*)))
+      (when tokens (format t "~&~a~%" (grey tokens))))
+    (format t "~&~a ~a~%" SEP (grey *model*))
 	(set-status STATUS-OK)))
 
 (defun use ()
@@ -144,3 +195,4 @@
   (setf *model* (model-id *models* num :id-key "name"
                           :id-fn (lambda (s) (remove-prefix s "models/"))))
   (use))
+
