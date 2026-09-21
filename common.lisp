@@ -284,9 +284,24 @@ agent-claudecode's own session file alongside its memory."
 	  (learn-from-skill skill)))
 
 ;; Status functions
+(defun recorded-agent-name (&optional (default "AGENT-CLAUDECODE"))
+  "The name of the agent USE-RECORDED-AGENT would select, as a short
+lower-case label: the package name with its leading AGENT- dropped, so
+AGENT-DEEPSEEK reads as \"deepseek\". Read non-destructively from the same
+source USE-RECORDED-AGENT uses (the agent file), so SET-STATUS can label the
+status with the recorded agent without re-selecting it -- calling
+USE-RECORDED-AGENT here would recurse, since every agent's USE calls
+SET-STATUS."
+  (flet ((short (name)
+           (let ((name (string-downcase name)))
+             (if (and (> (length name) 6) (string= "agent-" name :end2 6))
+                 (subseq name 6)
+                 name))))
+    (short (if (recall-agent) (package-name (recall-agent)) default))))
+
 (defun set-status (status)
   (with-open-file (out "./data/status" :direction :output :if-exists :supersede)
-	(format out "[AI:~a~a]" *current-model* status)))
+	(format out "[AI:~a:~a~a]" (recorded-agent-name) *current-model* status)))
 
 ;; Prompt helpers
 (defun get-prompt ()
