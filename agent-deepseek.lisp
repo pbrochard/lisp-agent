@@ -83,7 +83,10 @@ what a turn cost. NIL until a call is made.")
                   (agent-loop
                    (append (recall)
                            (list (obj "role" "user" "content" prompt)))))))
-    (format t "~&______~&~%~a~%~a ~a~%" (gethash "content" (car (last history))) SEP (grey *model*))
+    (format t "~&______~&~%~a~%" (gethash "content" (car (last history))))
+    (let ((tokens (openai-utils:format-usage-tokens *last-usage*)))
+      (when tokens (format t "~&~a~%" (grey tokens))))
+    (format t "~&~a ~a~%" SEP (grey *model*))
 	(set-status STATUS-OK)))
 
 (defun use ()
