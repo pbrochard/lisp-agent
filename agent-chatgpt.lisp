@@ -26,6 +26,10 @@
 
 (defparameter *models* nil)
 
+(defparameter *last-usage* nil
+  "The token usage the last model call reported, kept so USAGE can show
+what a turn cost. NIL until a call is made.")
+
 (defconstant MEMORY-FILE "/agent/data/memory-chatgpt.json")
 
 ;;; --- the tool: a Lisp REPL ---------------------------------------------
@@ -58,8 +62,10 @@
 
 (defun agent-loop (messages)
   "Returns the complete message history, final answer included."
-  (let* ((message (ref (call-model messages) "choices" 0 "message"))
+  (let* ((response (call-model messages))
+         (message (ref response "choices" 0 "message"))
          (tool-calls (gethash "tool_calls" message)))
+    (setf *last-usage* (gethash "usage" response))
     (if (and tool-calls (plusp (length tool-calls)))
         (agent-loop (append messages
                             (list message)
@@ -122,8 +128,9 @@
   (use))
 
 (defun usage (&optional date)
-  "Report this account's usage: GET-USAGE hits the provider's own endpoint
-and prints whatever it exposes -- per-day input/output tokens here. DATE, a
-\"YYYY-MM-DD\" string, picks the day and defaults to today."
+  "Report this account's usage. The last model call's token counts come
+first, when there was one -- what that turn cost -- then GET-USAGE's
+account report: the provider's own balance, daily tokens or identity.
+DATE, a \"YYYY-MM-DD\" string, picks the day and defaults to today."
+  (openai-utils:print-usage-tokens *last-usage*)
   (openai-utils:get-usage :openai *api-key* :date date))
-

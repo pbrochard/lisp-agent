@@ -26,6 +26,10 @@
 
 (defparameter *models* nil)
 
+(defparameter *last-usage* nil
+  "The token usage the last model call reported, kept so USAGE can show
+what a turn cost. NIL until a call is made.")
+
 (defconstant MEMORY-FILE "/agent/data/memory-mistral.json")
 
 ;;; --- the tool: a Lisp REPL ---------------------------------------------
@@ -58,8 +62,10 @@
 
 (defun agent-loop (messages)
   "Returns the complete message history, final answer included."
-  (let* ((message (ref (call-model messages) "choices" 0 "message"))
+  (let* ((response (call-model messages))
+         (message (ref response "choices" 0 "message"))
          (tool-calls (gethash "tool_calls" message)))
+    (setf *last-usage* (gethash "usage" response))
     (if (and tool-calls (not (eq tool-calls :null)) (plusp (length tool-calls)))
         (agent-loop (append messages
                             (list message)
@@ -122,9 +128,10 @@
   (use))
 
 (defun usage (&optional date)
-  "Report this account's usage: GET-USAGE hits mistral's own endpoint
-and prints whatever it exposes -- a balance, or account identity where the
-API offers no usage figure."
+  "Report this account's usage. The last model call's token counts come
+first, when there was one, then GET-USAGE's account report -- here only
+identity, as Mistral exposes no balance or usage. DATE is accepted so
+(usage) is uniform across agents and ignored."
   (declare (ignore date))
+  (openai-utils:print-usage-tokens *last-usage*)
   (openai-utils:get-usage :mistral *api-key*))
-

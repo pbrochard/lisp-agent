@@ -1,6 +1,6 @@
 (defpackage :openai-utils
   (:use :cl :utils)
-  (:export #:execute #:get-usage #:deepseek-balance #:openai-usage #:mistral-account))
+  (:export #:execute #:get-usage #:deepseek-balance #:openai-usage #:mistral-account #:format-usage-tokens #:print-usage-tokens))
 
 (in-package :openai-utils)
 
@@ -122,4 +122,47 @@ returns the raw parsed reply, so a caller can also use it in code."
       (:mistral  (print-mistral-usage reply)))
     (format t "~a~%" +usage-separator+)
     reply))
+
+
+;;; --- per-call token counts -------------------------------------------
+;;; The account endpoints above answer what an account has spent; the model
+;;; responses answer what one call cost, and that is the same shape on all
+;;; three providers: prompt/completion/total tokens, with the cache and
+;;; reasoning sub-counts present only when the model reports them. Each
+;;; agent keeps the last response's usage in *LAST-USAGE* and prints it here.
+
+(defun usage-token-counts (usage)
+  "USAGE's token fields as a plist of :INPUT, :OUTPUT, :TOTAL, :CACHED and
+:REASONING, any of which is NIL when the provider did not report it. The
+OpenAI-compatible spelling is prompt_tokens/completion_tokens/total_tokens,
+with the cache and reasoning counts nested under the *_details objects."
+  (when usage
+    (let ((prompt-details (gethash "prompt_tokens_details" usage))
+          (completion-details (gethash "completion_tokens_details" usage)))
+      (list :input (gethash "prompt_tokens" usage)
+            :output (gethash "completion_tokens" usage)
+            :total (gethash "total_tokens" usage)
+            :cached (and prompt-details (gethash "cached_tokens" prompt-details))
+            :reasoning (and completion-details
+                            (gethash "reasoning_tokens" completion-details))))))
+
+(defun format-usage-tokens (usage)
+  "USAGE as one readable line, or NIL when there is nothing to show. A
+count the provider left out is not printed rather than shown as zero, so
+the line never implies a figure the reply did not carry."
+  (let ((counts (usage-token-counts usage)))
+    (when counts
+      (destructuring-bind (&key input output total cached reasoning) counts
+        (with-output-to-string (s)
+          (write-string "Tokens:" s)
+          (when input  (format s " ~a in" input))
+          (when output (format s "~:[, ~; ~]~a out" (not input) output))
+          (when (and total (/= total (or output 0))) (format s " (~a total)" total))
+          (when (and cached (plusp cached)) (format s ", ~a cached" cached))
+          (when (and reasoning (plusp reasoning)) (format s ", ~a reasoning" reasoning)))))))
+
+(defun print-usage-tokens (usage)
+  "Print FORMAT-USAGE-TOKENS of USAGE, silenced when there is nothing to say."
+  (let ((line (format-usage-tokens usage)))
+    (when line (format t "~&~a~%" line))))
 
