@@ -52,7 +52,7 @@ what a turn cost. NIL until a call has been made.")
          (result (if (string= name "lisp-eval")
                      (lisp-eval (gethash "form" args))
                      (format nil "ERROR: unknown tool ~a" name))))
-    (format t "~&  ⤷ ~a => ~a~%" (gethash "form" args) result)
+    (format t "~&  ⤷ ~a~&    => ~a~%" (grey (gethash "form" args)) (grey result))
     (obj "role" "tool"
          "tool_call_id" (gethash "id" tool-call)
          "content" result)))

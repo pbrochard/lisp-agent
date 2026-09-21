@@ -50,7 +50,7 @@ what a turn cost. NIL until a call has been made.")
          (result (run-lisp-eval-tool name args))
          (fr (obj "name" name "response" (obj "result" result))))
     (when id (setf (gethash "id" fr) id))
-    (format t "~&  ⤷ ~a => ~a~%" (gethash "form" args) result)
+    (format t "~&  ⤷ ~a~&    => ~a~%" (grey (gethash "form" args)) (grey result))
     (obj "functionResponse" fr)))
 
 ;;; --- talking to the model ----------------------------------------------

@@ -1,6 +1,6 @@
 (defpackage :common
   (:use :cl :utils :cl-ansi-text :uiop)
-  (:export #:SYSTEM-PROMPT #:*CURRENT-RUN-FN* #:*current-model* #:*MEMORY-FILE* #:*SYSTEM-MESSAGE* #:SEP #:GREY #:RECALL
+  (:export #:SYSTEM-PROMPT #:*CURRENT-RUN-FN* #:*current-model* #:*MEMORY-FILE* #:*SYSTEM-MESSAGE* #:SEP #:RECALL
 		   #:REMEMBER #:FORGET-MEM #:FORGET-ALL #:BASH #:CD #:SET-STATUS #:STATUS-THINKING #:STATUS-OK #:print-model-ids #:model-id
 		   #:GET-PROMPT #:EP #:RP #:P #:ENP #:NP #:R #:HELP #:REMEMBER-AGENT #:RECALL-AGENT #:USE-RECORDED-AGENT)
   (:nicknames :c :co))
@@ -22,20 +22,6 @@
 (defmacro defalias (alias original)
   "Make ALIAS share ORIGINAL's function object, so calling ALIAS doesn't add an extra funcall."
   `(setf (fdefinition ',alias) (fdefinition ',original)))
-
-(defun grey (string)
-  "cl-ansi-text only ships the 8 basic ANSI colors, none of them grey, so this
-needs a wider palette. :24bit (truecolor, 38;2;r;g;b) looks right in a
-directly-attached terminal but many terminal emulators/multiplexers -- tmux
-or screen without an explicit Tc/RGB override, older terminal apps, some
-SSH/web terminals -- don't understand it and silently render the default
-foreground color instead of grey. :8bit (the 256-color palette, 38;5;n) has
-been near-universally supported since the late 90s, so it renders as grey
-almost everywhere truecolor might silently fail."
-  (let ((*color-mode* :8bit))
-    (with-output-to-string (s)
-      (with-color ("#808080" :stream s)
-        (write-string string s)))))
 
 ;;; --- memory ---------------------------------------------------------------
 ;;; Messages are already a list of hash tables, i.e. already JSON.

@@ -16,7 +16,7 @@
   (let* ((name (ref tool-call "function" "name"))
          (args (shasht:read-json (ref tool-call "function" "arguments")))
          (result (run-lisp-eval-tool name args)))
-    (format t "~&  ⤷ ~a => ~a~%" (gethash "form" args) result)
+    (format t "~&  ⤷ ~a~&    => ~a~%" (grey (gethash "form" args)) (grey result))
     (obj "role" "tool"
          "tool_call_id" (gethash "id" tool-call)
          "content" result)))

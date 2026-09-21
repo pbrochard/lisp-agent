@@ -47,7 +47,7 @@ what a turn cost. NIL until a call has been made.")
   (let* ((name (gethash "name" tool-use))
          (args (gethash "input" tool-use))
          (result (run-lisp-eval-tool name args)))
-    (format t "~&  ⤷ ~a => ~a~%" (gethash "form" args) result)
+    (format t "~&  ⤷ ~a~&    => ~a~%" (grey (gethash "form" args)) (grey result))
     (obj "type" "tool_result"
          "tool_use_id" (gethash "id" tool-use)
          "content" result)))
