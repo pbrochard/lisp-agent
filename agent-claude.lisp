@@ -15,7 +15,7 @@
 
 (defpackage :agent-claude
   (:use :cl :utils :http-utils :common)
-  (:export #:run #:use #:forget #:list-models #:*models* #:lm #:llm #:set-model)
+  (:export #:run #:use #:forget #:list-models #:*models* #:lm #:llm #:set-model #:usage)
   (:nicknames :cd :claude))
 
 (in-package :agent-claude)
@@ -27,6 +27,10 @@
 (defparameter *api-version* "2023-06-01")
 
 (defparameter *models* nil)
+
+(defparameter *last-usage* nil
+  "The token usage the last model call reported, kept so USAGE can show
+what a turn cost. NIL until a call has been made.")
 
 (defconstant MEMORY-FILE "/agent/data/memory-claude.json")
 
@@ -70,11 +74,13 @@
 
 (defun agent-loop (messages)
   "Returns the complete message history, final answer included."
-  (let* ((content (gethash "content" (call-model messages)))
+  (let* ((response (call-model messages))
+         (content (gethash "content" response))
          (assistant (obj "role" "assistant" "content" content))
          (tool-uses (remove-if-not
                      (lambda (b) (string= (gethash "type" b) "tool_use"))
                      (coerce content 'list))))
+    (setf *last-usage* (gethash "usage" response))
     (if tool-uses
         (agent-loop (append messages
                             (list assistant)
@@ -93,6 +99,54 @@
 
 (defun use () nil)
 
+;;; --- usage & token reporting ------------------------------------------
+;;; Claude reports a call's token counts in a top-level USAGE object:
+;;; input_tokens and output_tokens, the cache read/creation counts, and any
+;;; thinking tokens under output_tokens_details. A regular API key cannot
+;;; read the organization usage report (that needs an admin key), so there is
+;;; no account balance to add the way DeepSeek and OpenAI allow -- only what
+;;; a call cost.
+
+(defun format-claude-tokens (usage)
+  "USAGE as one readable line, or NIL when there is nothing to show. The
+style matches openai-utils:FORMAT-USAGE-TOKENS so a run reads the same
+whichever agent ran it. A count Claude left out is not printed rather than
+shown as zero."
+  (when usage
+    (let* ((input (gethash "input_tokens" usage))
+           (output (gethash "output_tokens" usage))
+           (cache-read (gethash "cache_read_input_tokens" usage))
+           (cache-creation (gethash "cache_creation_input_tokens" usage))
+           (details (gethash "output_tokens_details" usage))
+           (thinking (and details (gethash "thinking_tokens" details)))
+           (total (and (or input output) (+ (or input 0) (or output 0)))))
+      (with-output-to-string (s)
+        (write-string "Tokens:" s)
+        (when input  (format s " ~a in" input))
+        (when output (format s "~:[, ~; ~]~a out" (not input) output))
+        (when (and total (/= total (or output 0))) (format s " (~a total)" total))
+        (when (and cache-read (plusp cache-read)) (format s ", ~a cache read" cache-read))
+        (when (and cache-creation (plusp cache-creation)) (format s ", ~a cache creation" cache-creation))
+        (when (and thinking (plusp thinking)) (format s ", ~a reasoning" thinking))))))
+
+(defun print-claude-tokens (usage)
+  "Print FORMAT-CLAUDE-TOKENS of USAGE, silent when there is nothing to say."
+  (let ((line (format-claude-tokens usage)))
+    (when line (format t "~&~a~%" line))))
+
+(defun usage (&optional date)
+  "Report usage. The last model call's token counts come first, when there was
+one -- what that turn cost. A regular Claude API key cannot read the
+organization usage report (that needs an admin key), so there is no account
+balance to add the way the OpenAI-compatible agents do. DATE is accepted so
+(usage) is uniform across agents and ignored."
+  (declare (ignore date))
+  (let ((line (format-claude-tokens *last-usage*)))
+    (if line
+        (format t "~&~a~%" (grey line))
+        (format t "~&No model call yet in this session.~%"))
+    (format t "~&~a~%" (grey "No account usage over the API without an admin key."))))
+
 (defun run (prompt)
   (use)
   (set-status STATUS-THINKING)
@@ -100,7 +154,10 @@
                   (agent-loop
                    (append (recall)
                            (list (obj "role" "user" "content" prompt)))))))
-    (format t "~&______~&~%~a~%~a ~a~%" (final-text (car (last history))) SEP (grey *model*))
+    (format t "~&______~&~%~a~%" (final-text (car (last history))))
+    (let ((tokens (format-claude-tokens *last-usage*)))
+      (when tokens (format t "~&~a~%" (grey tokens))))
+    (format t "~&~a ~a~%" SEP (grey *model*))
 	(set-status STATUS-OK)))
 
 (defun use ()
