@@ -13,5 +13,7 @@ echo "[AI]" > $STATUS_FILE
 
 # Wrap SBCL in rlwrap for better command line editing and history support
 # https://gist.github.com/vindarel/2309154f4e751be389fa99239764c363
-rlwrap -r -i -b '()' --no-warnings sbcl --load load.lisp --eval '(in-package :common)'
-
+# To filter out colors:
+#   `tail -F session-out.log | ansifilter`
+#   `ansifilter session-out.log > session-out-mono.log`
+script -q -f -c "rlwrap -r -i -b '()' --no-warnings sbcl --load load.lisp --eval '(in-package :common)'" ./data/session-out.log
