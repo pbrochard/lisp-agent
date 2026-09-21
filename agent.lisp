@@ -15,7 +15,7 @@
 
 (defpackage :agent
   (:use :cl :utils :http-utils :common)
-  (:export #:run #:use #:forget)
+  (:export #:run #:use #:forget #:usage)
   (:nicknames :a :ag))
 
 (in-package :agent)
@@ -26,6 +26,10 @@
 (defparameter *api-key* (uiop:getenv "API_KEY_OPENROUTER"))
 
 (defconstant MEMORY-FILE "/agent/data/memory-agent.json")
+
+(defparameter *last-usage* nil
+  "The token usage the last model call reported, kept so USAGE can show
+what a turn cost. NIL until a call has been made.")
 
 ;;; --- the tool: a Lisp REPL ---------------------------------------------
 
@@ -72,8 +76,10 @@
 (defun agent-loop (messages)
   "Returns the complete message history, final answer included.
 The answer is just (gethash \"content\" (car (last messages)))."
-  (let* ((message (ref (call-model messages) "choices" 0 "message"))
+  (let* ((response (call-model messages))
+         (message (ref response "choices" 0 "message"))
          (tool-calls (gethash "tool_calls" message)))
+    (setf *last-usage* (gethash "usage" response))
     (if (and tool-calls (plusp (length tool-calls)))
         (agent-loop (append messages
                             (list message)
@@ -83,6 +89,20 @@ The answer is just (gethash \"content\" (car (last messages)))."
 ;;; --- entry point ------------------------------------------------------------
 (defun use () nil)
 
+;;; --- usage & token reporting ------------------------------------------
+;;; OpenRouter answers in the OpenAI-compatible shape, so a call's token
+;;; counts come back in the response's USAGE object. The account balance
+;;; lives with whichever provider OpenRouter routed to and is not exposed
+;;; here, so this reports what a call cost, not what is left.
+
+(defun usage (&optional date)
+  "Report usage. The last model call's token counts come first, when there was
+one -- what that turn cost. OpenRouter exposes no account balance through
+this API, so there is nothing to add the way DeepSeek and OpenAI allow.
+DATE is accepted so (usage) is uniform across agents and ignored."
+  (declare (ignore date))
+  (openai-utils:print-usage-tokens *last-usage*))
+
 (defun run (prompt)
   (use)
   (set-status STATUS-THINKING)
@@ -90,7 +110,10 @@ The answer is just (gethash \"content\" (car (last messages)))."
                   (agent-loop
                    (append (recall)
                            (list (obj "role" "user" "content" prompt)))))))
-    (format t "~&______~&~%~a~%~a ~a~%" (gethash "content" (car (last history))) SEP (grey *model*))
+    (format t "~&______~&~%~a~%" (gethash "content" (car (last history))))
+    (let ((tokens (openai-utils:format-usage-tokens *last-usage*)))
+      (when tokens (format t "~&~a~%" (grey tokens))))
+    (format t "~&~a ~a~%" SEP (grey *model*))
 	(set-status STATUS-OK)))
 
 (defun use ()
