@@ -206,7 +206,7 @@ interface, not an agent's own, and so is left out of its extras.")
     ("SET-TIMEZONE"  . "zone usage reset times show in: (set-timezone \"Asia/Tokyo\")")
     ("VERBOSE"       . "toggle the live tool trace")
     ("SET-VERBOSE"   . "turn the live tool trace on or off")
-    ("USAGE"        . "report this session's rate-limit windows and cost"))
+    ("USAGE"       . "report this account's usage: cost, balance or tokens"))
   "One line about an agent's own command, keyed by exported symbol name.")
 
 (defun variable-name-p (name)

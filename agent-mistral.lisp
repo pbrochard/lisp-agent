@@ -15,7 +15,7 @@
 
 (defpackage :agent-mistral
   (:use :cl :utils :http-utils :openai-utils :common)
-  (:export #:run #:use #:forget #:list-models #:*models* #:lm #:llm #:set-model)
+  (:export #:run #:use #:forget #:list-models #:*models* #:lm #:llm #:set-model #:usage)
   (:nicknames :mi :mistral))
 
 (in-package :agent-mistral)
@@ -120,3 +120,11 @@
   (list-models)
   (setf *model* (model-id *models* num))
   (use))
+
+(defun usage (&optional date)
+  "Report this account's usage: GET-USAGE hits mistral's own endpoint
+and prints whatever it exposes -- a balance, or account identity where the
+API offers no usage figure."
+  (declare (ignore date))
+  (openai-utils:get-usage :mistral *api-key*))
+

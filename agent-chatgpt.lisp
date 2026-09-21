@@ -15,7 +15,7 @@
 
 (defpackage :agent-chatgpt
   (:use :cl :utils :http-utils :openai-utils :common)
-  (:export #:run #:use #:forget #:list-models #:*models* #:lm #:llm #:set-model)
+  (:export #:run #:use #:forget #:list-models #:*models* #:lm #:llm #:set-model #:usage)
   (:nicknames :gpt :chatgpt :oai))
 
 (in-package :agent-chatgpt)
@@ -120,3 +120,10 @@
   (list-models)
   (setf *model* (model-id *models* num))
   (use))
+
+(defun usage (&optional date)
+  "Report this account's usage: GET-USAGE hits the provider's own endpoint
+and prints whatever it exposes -- per-day input/output tokens here. DATE, a
+\"YYYY-MM-DD\" string, picks the day and defaults to today."
+  (openai-utils:get-usage :openai *api-key* :date date))
+
