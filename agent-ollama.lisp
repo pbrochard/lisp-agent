@@ -132,7 +132,7 @@ agents and ignored."
     (format t "~&______~&~%~a~%" (final-text (car (last history))))
     (let ((tokens (format-ollama-tokens *last-usage*)))
       (when tokens (format t "~&~a~%" (grey tokens))))
-    (format t "~&~a ~a~%" SEP (grey *model*))
+    (format t "~&~a ~a:~a~%" SEP (grey (recorded-agent-name)) (grey *model*))
 	(set-status STATUS-OK)))
 
 (defun use ()

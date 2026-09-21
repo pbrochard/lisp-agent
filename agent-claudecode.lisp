@@ -898,9 +898,10 @@ carries no rate-limit payload of its own, hence *LAST-RATE-LIMIT*."
                       (list (obj "role" "user" "content" prompt)
                             (obj "role" "assistant" "content" (strip-terminal-control-chars text)))))
     (sb-thread:with-mutex (*output-lock*)
-      (format t "~&~%~a~%~a ~a~%"
+      (format t "~&~%~a~%~a ~a:~a~%"
 			  (grey (format-usage cost rate-limit usage))
-			  SEP (grey *model*)))
+			  SEP (grey (recorded-agent-name))
+			  (grey *model*)))
     (set-status STATUS-OK)))
 
 (defun use ()

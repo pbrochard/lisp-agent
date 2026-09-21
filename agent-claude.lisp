@@ -157,7 +157,7 @@ balance to add the way the OpenAI-compatible agents do. DATE is accepted so
     (format t "~&______~&~%~a~%" (final-text (car (last history))))
     (let ((tokens (format-claude-tokens *last-usage*)))
       (when tokens (format t "~&~a~%" (grey tokens))))
-    (format t "~&~a ~a~%" SEP (grey *model*))
+    (format t "~&~a ~a:~a~%" SEP (grey (recorded-agent-name)) (grey *model*))
 	(set-status STATUS-OK)))
 
 (defun use ()

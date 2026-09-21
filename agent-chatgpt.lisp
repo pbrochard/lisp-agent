@@ -86,7 +86,7 @@ what a turn cost. NIL until a call is made.")
     (format t "~&______~&~%~a~%" (gethash "content" (car (last history))))
     (let ((tokens (openai-utils:format-usage-tokens *last-usage*)))
       (when tokens (format t "~&~a~%" (grey tokens))))
-    (format t "~&~a ~a~%" SEP (grey *model*))
+    (format t "~&~a ~a:~a~%" SEP (grey (recorded-agent-name)) (grey *model*))
 	(set-status STATUS-OK)))
 
 (defun use ()

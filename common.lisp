@@ -2,7 +2,7 @@
   (:use :cl :utils :cl-ansi-text :uiop)
   (:export #:SYSTEM-PROMPT #:*CURRENT-RUN-FN* #:*current-model* #:*MEMORY-FILE* #:*SYSTEM-MESSAGE* #:SEP #:RECALL
 		   #:REMEMBER #:FORGET-MEM #:FORGET-ALL #:BASH #:CD #:SET-STATUS #:STATUS-THINKING #:STATUS-OK #:print-model-ids #:model-id
-		   #:GET-PROMPT #:EP #:RP #:P #:ENP #:NP #:R #:HELP #:REMEMBER-AGENT #:RECALL-AGENT #:USE-RECORDED-AGENT)
+		   #:GET-PROMPT #:EP #:RP #:P #:ENP #:NP #:R #:HELP #:REMEMBER-AGENT #:RECALL-AGENT #:USE-RECORDED-AGENT #:RECORDED-AGENT-NAME)
   (:nicknames :c :co))
 
 (in-package :common)
