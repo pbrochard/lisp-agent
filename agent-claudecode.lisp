@@ -570,12 +570,15 @@ some other kind. Many thinking deltas arrive genuinely empty."
             (and (vectorp tools) (length tools)))))
 
 (defun make-stream-printer ()
-  "Return a fresh ON-EVENT callback for CALL-CLAUDE that renders a
-stream_event live: grey for thinking, plain for the reply text, and -- with
-*VERBOSE* on -- a grey line per tool call and per tool result. Exactly one
-blank line separates each transition into a text block, tracked by counting
-the trailing newlines already written rather than inserting one blindly,
-which double-spaced whenever the model's own text already supplied the gap."
+  "Return (values ON-EVENT FLUSH-REMAINING-OUTPUT) for CALL-CLAUDE. ON-EVENT
+renders a stream_event live: grey for thinking, plain for the reply text, and
+-- with *VERBOSE* on -- a grey line per tool call and per tool result. Exactly
+one blank line separates each transition into a text block, tracked by
+counting the trailing newlines already written rather than inserting one
+blindly, which double-spaced whenever the model's own text already supplied
+the gap. FLUSH-REMAINING-OUTPUT is for the caller to run once CALL-CLAUDE
+returns, since ON-EVENT buffers an in-progress line until its closing newline
+arrives and would otherwise lose it if the CLI's stream ends without one."
   (let ((trailing-newlines 2) ; RUN's own preamble already ends on a blank line
         (pending-bracket "")
         (pending-line "")
@@ -762,17 +765,26 @@ rather than a generic \"subagent\"."
                  (let ((subagent-name (subagent-name-of event)))
                    (loop for block across (message-blocks event)
                          do (print-message-block subagent-name block)))))
-        (lambda (event)
-          (cond
-            ((equal (gethash "type" event) "stream_event")
-             (sb-thread:with-mutex (*output-lock*)
-               (print-stream-event (gethash "event" event))))
-            ((and *verbose* (init-event-p event))
-             (sb-thread:with-mutex (*output-lock*)
-               (print-trace-line (init-trace-line event))))
-            ((message-event-p event)
-             (sb-thread:with-mutex (*output-lock*)
-               (print-message event)))))))))
+        (values
+         (lambda (event)
+           (cond
+             ((equal (gethash "type" event) "stream_event")
+              (sb-thread:with-mutex (*output-lock*)
+                (print-stream-event (gethash "event" event))))
+             ((and *verbose* (init-event-p event))
+              (sb-thread:with-mutex (*output-lock*)
+                (print-trace-line (init-trace-line event))))
+             ((message-event-p event)
+              (sb-thread:with-mutex (*output-lock*)
+                (print-message event)))))
+         (lambda ()
+           "Flush whatever the text stream still has buffered. The CLI's
+stream always closes each block itself, but if the process dies mid-turn
+without one, this is what keeps the buffered tail from being lost instead of
+just left on the terminal by CONTENT_BLOCK_STOP."
+           (sb-thread:with-mutex (*output-lock*)
+             (flush-streamed-text!)
+             (finish-output))))))))
 
 (defun drain-stderr (process)
   "Forward the child's stderr to *error-output*, sanitizing each line, on its
@@ -922,19 +934,21 @@ carries no rate-limit payload of its own, hence *LAST-RATE-LIMIT*."
   (set-status STATUS-THINKING)
   (reset-tool-history)
   (format t "~&______~&~%")
-  (multiple-value-bind (text session-id cost rate-limit usage)
-      (call-claude prompt (make-stream-printer))
-    (when session-id (write-session-id session-id))
-    (when rate-limit (setf *last-rate-limit* rate-limit))
-    (remember (append (recall)
-                      (list (obj "role" "user" "content" prompt)
-                            (obj "role" "assistant" "content" (strip-terminal-control-chars text)))))
-    (sb-thread:with-mutex (*output-lock*)
-      (format t "~&~%~a~%~a ~a:~a~%"
-			  (grey (format-usage cost rate-limit usage))
-			  SEP (grey (recorded-agent-name))
-			  (grey *model*)))
-    (set-status STATUS-OK)))
+  (multiple-value-bind (on-event flush-remaining-output) (make-stream-printer)
+    (multiple-value-bind (text session-id cost rate-limit usage)
+        (call-claude prompt on-event)
+      (funcall flush-remaining-output)
+      (when session-id (write-session-id session-id))
+      (when rate-limit (setf *last-rate-limit* rate-limit))
+      (remember (append (recall)
+                        (list (obj "role" "user" "content" prompt)
+                              (obj "role" "assistant" "content" (strip-terminal-control-chars text)))))
+      (sb-thread:with-mutex (*output-lock*)
+        (format t "~&~%~a~%~a ~a:~a~%"
+                (grey (format-usage cost rate-limit usage))
+                SEP (grey (recorded-agent-name))
+                (grey *model*)))
+      (set-status STATUS-OK))))
 
 (defun use ()
   (setf *current-run-fn* #'run
