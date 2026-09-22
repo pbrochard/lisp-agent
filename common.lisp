@@ -128,7 +128,8 @@ says which agent it came up on. Returns the package now current."
     ("Session"
      ("run"    . "send a prompt straight to the current agent: (run \"...\")")
      ("use"    . "make this agent the current one and report its model")
-     ("forget" . "wipe this agent's conversation memory"))
+     ("forget" . "wipe this agent's conversation memory")
+     ("usage"   . "report this account's usage: cost, balance or tokens"))
     ("Shell"
      ("bash" . "drop into a bash shell")
      ("cd"   . "change directory: (cd \"/tmp\")")))
@@ -181,7 +182,8 @@ silently dropped."
 ;;; updating when an agent gains a command.
 
 (defparameter *shared-exports*
-  '("RUN" "USE" "FORGET" "LM" "LLM" "SET-MODEL" "LIST-MODELS")
+  '("RUN" "USE" "FORGET" "LM" "LLM" "SET-MODEL" "LIST-MODELS"
+     "USAGE")
   "The verbs every agent exports; a command in this list is common
 interface, not an agent's own, and so is left out of its extras.")
 
@@ -225,7 +227,6 @@ none: most agents are exactly the shared interface."
   (let ((extras (agent-extras package-name)))
     (when extras
       ;;(format t "~&~%  ~a:~%" (string-downcase package-name))
-	  (format t "     Extra commands:~%")
       (dolist (name extras)
         (let ((blurb (cdr (assoc (string-upcase name)
                                  *agent-command-blurbs* :test #'string=))))
