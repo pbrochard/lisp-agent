@@ -578,6 +578,8 @@ the trailing newlines already written rather than inserting one blindly,
 which double-spaced whenever the model's own text already supplied the gap."
   (let ((trailing-newlines 2) ; RUN's own preamble already ends on a blank line
         (pending-bracket "")
+        (pending-line "")
+        (pending-line-grey nil)
         (subagent-names (make-hash-table :test #'equal))
         (tool-names (make-hash-table :test #'equal))
         (tool-descriptions (make-hash-table :test #'equal))
@@ -618,24 +620,57 @@ that could still complete in PENDING-BRACKET for the next chunk."
                                 (t
                                  (write-char (char full i) out)
                                  (incf i))))))))
-             (flush-pending! ()
+             (flush-pending-bracket! ()
                "A held-back sequence never completes if the block ends right
-there -- emit it as literal text rather than losing it."
-               (unless (zerop (length pending-bracket))
-                 (write-string pending-bracket)
-                 (setf pending-bracket "")))
+there -- hand it to the line it was cut out of rather than losing it."
+               (setf pending-line (concatenate 'string pending-line pending-bracket)
+                     pending-bracket ""))
+             (write-tracked! (rendered plain)
+               (write-string rendered)
+               (track! plain))
+             (print-grey-line! (line)
+               "LINE greyed and terminated, written as one string: a line put
+out in pieces is a line rlwrap redraws between them."
+               (let ((break (string #\Newline)))
+                 (write-tracked! (concatenate 'string (grey-multiline line) break)
+                                 (concatenate 'string line break))))
+             (render-streamed (str grey)
+               (if grey (grey-multiline str) str))
+             (write-whole-lines! (str grey)
+               "Write STR up to its last newline and hold the rest back until
+the newline ending it arrives. rlwrap takes any unfinished line for a prompt
+and redraws it on every write, climbing rows with cursor-up to do so; where
+its column arithmetic and the terminal's disagree -- a double-width glyph, a
+line ending exactly at the last column, a scroll landing mid-redraw -- the
+redraw resumes on the wrong row and the lines mash into each other. A line
+written whole is never redrawn."
+               (unless (eq grey pending-line-grey) (flush-pending-line!))
+               (setf pending-line-grey grey)
+               (let* ((buffered (concatenate 'string pending-line str))
+                      (line-end (position #\Newline buffered :from-end t)))
+                 (when line-end
+                   (let ((whole-lines (subseq buffered 0 (1+ line-end))))
+                     (write-tracked! (render-streamed whole-lines grey) whole-lines)))
+                 (setf pending-line (if line-end (subseq buffered (1+ line-end)) buffered))))
+             (flush-pending-line! ()
+               (unless (zerop (length pending-line))
+                 (write-tracked! (render-streamed pending-line pending-line-grey) pending-line)
+                 (setf pending-line "")))
+             (flush-streamed-text! ()
+               "Put out what the text stream still holds back, for output that
+must not be overtaken by it: an SGR sequence that can no longer complete,
+then the unfinished line."
+               (flush-pending-bracket!)
+               (flush-pending-line!))
              (print-subagent-block (content-key subagent-name block)
                "A forwarded subagent block arrives whole rather than as
 deltas, so it is printed as one unit, tagged with the subagent it came
 from. The grey span stops before the newline, per GREY-MULTILINE."
                (let ((clean (strip-terminal-control-chars (gethash content-key block))))
                  (unless (zerop (length clean))
-                   (flush-pending!)
+                   (flush-streamed-text!)
                    (ensure-blank-line)
-                   (let ((line (format nil "  ⤷ [~a] ~a" subagent-name clean)))
-                     (write-string (grey line))
-                     (write-char #\Newline)
-                     (track! (concatenate 'string line (string #\Newline))))
+                   (print-grey-line! (format nil "  ⤷ [~a] ~a" subagent-name clean))
                    (setf last-line-was-trace nil)
                    (finish-output))))
              (print-trace-line (line)
@@ -643,11 +678,9 @@ from. The grey span stops before the newline, per GREY-MULTILINE."
 single spaced -- the common case, a model firing several tools back to back
 -- while the first after other output gets a blank line above it. LINE is
 newline-free (see ONE-LINE), as GREY-MULTILINE's constraint requires."
-               (flush-pending!)
+               (flush-streamed-text!)
                (if last-line-was-trace (ensure-line-start) (ensure-blank-line))
-               (write-string (grey line))
-               (write-char #\Newline)
-               (track! (concatenate 'string line (string #\Newline)))
+               (print-grey-line! line)
                (setf last-line-was-trace t)
                (finish-output))
              (remember-call (block)
@@ -694,20 +727,19 @@ rather than a generic \"subagent\"."
                                     (strip-terminal-control-chars
                                      (if (thinking-delta-p delta) raw (restore-sgr-escapes raw))))))
                    (when (and clean (plusp (length clean)))
-                     (write-string (if (thinking-delta-p delta) (grey-multiline clean) clean))
-                     (track! clean)
+                     (write-whole-lines! clean (thinking-delta-p delta))
                      (setf last-line-was-trace nil)
                      (finish-output))))
                (print-stream-event (inner)
                  (let ((inner-type (gethash "type" inner)))
                    (cond
                      ((text-block-start-p inner)
-                      (flush-pending!)
+                      (flush-streamed-text!)
                       (ensure-blank-line)
                       (setf last-line-was-trace nil)
                       (finish-output))
                      ((equal inner-type "content_block_stop")
-                      (flush-pending!)
+                      (flush-streamed-text!)
                       (finish-output))
                      ((equal inner-type "content_block_delta")
                       (print-delta (gethash "delta" inner))))))
