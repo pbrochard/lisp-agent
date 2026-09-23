@@ -47,7 +47,7 @@ COPY prepare-sbcl.sh .
 
 COPY load.lisp utils.lisp openai-utils.lisp http-utils.lisp common.lisp agent.lisp agent-gemini.lisp agent-claude.lisp agent-claudecode.lisp \
 	agent-ollama.lisp agent-deepseek.lisp agent-mistral.lisp agent-chatgpt.lisp .
-COPY agent-run.sh .
+COPY agent-run.sh ollama-bridge.js .
 RUN chmod a+x ./agent-run.sh ./prepare-sbcl.sh
 
 COPY skills/ ./skills/

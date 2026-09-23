@@ -1,13 +1,13 @@
-// (agent:run "You have access to mongo with `(uiop:run-program \"mongosh --quiet --eval ...\" :output :string)`")
+// Relays 127.0.0.1:11434 inside the container to `ollama serve` on the
+// host, so agent-ollama.lisp's hardcoded localhost endpoint keeps working
+// unchanged. See skills/mongo/scripts/mongo-bridge.js for the same pattern.
 
 const net = require('net');
 
-const LOCAL_PORT = 27017;
+const LOCAL_PORT = 11434;
 const LOCAL_HOST = '127.0.0.1';
-const REMOTE_PORT = 27017;
-// host-gateway, set up by run.sh's --add-host -- lisp-agent's own
-// $NETWORK has no fixed address for the host the way the default
-// "bridge" network does at 172.17.0.1.
+const REMOTE_PORT = 11434;
+// host-gateway, set up by run.sh's --add-host.
 const REMOTE_HOST = 'host.docker.internal';
 
 const server = net.createServer((socket) => {

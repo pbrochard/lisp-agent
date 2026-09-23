@@ -65,8 +65,14 @@ if [ "$(docker inspect -f '{{.State.Running}}' keyproxy 2>/dev/null)" != "true" 
 fi
 echo "keyproxy up."
 
+# mongo-bridge.js and ollama-bridge.js run inside this container and relay
+# a local port to a service on the host (mongod, ollama serve). lisp-agent
+# isn't on the default "bridge" network where that's reachable at a fixed
+# 172.17.0.1 -- it's on its own $NETWORK -- so the host has no address here
+# unless we hand it one explicitly.
 docker run -it --rm \
 	   --network "$NETWORK" \
+	   --add-host=host.docker.internal:host-gateway \
 	   -e KEYPROXY_URL=http://keyproxy:8080 \
 	   -e CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN \
 	   -e ENTRYPOINT=$ENTRYPOINT \
