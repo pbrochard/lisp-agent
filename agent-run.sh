@@ -15,6 +15,9 @@ echo "[AI]" > $STATUS_FILE
 
 /agent/prepare-sbcl.sh
 
+# Bridge 127.0.0.1:27017 -> host mongo, unreachable directly since the keyproxy network change
+node /agent/skills/mongo/scripts/mongo-bridge.js >> /agent/data/mongo-bridge.log 2>&1 &
+
 # Wrap SBCL in rlwrap for better command line editing and history support
 # https://gist.github.com/vindarel/2309154f4e751be389fa99239764c363
 # To filter out colors:
