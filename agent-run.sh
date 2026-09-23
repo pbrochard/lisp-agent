@@ -2,6 +2,8 @@
 
 STATUS_FILE="/agent/data/status"
 
+export PATH="/home/user/.local/bin:$PATH"
+
 function finish {
 	rm -f $STATUS_FILE
     exit $1
