@@ -40,20 +40,21 @@ WORKDIR /
 RUN chown -R user:user /home/user
 
 WORKDIR /agent
-RUN chown -R user:user /agent
-
-# Switch to non-root user
-USER user
 
 ## Quicklisp, installed non-interactively and wired into the SBCL init file.
 COPY prepare-sbcl.sh .
-RUN ./prepare-sbcl.sh
 
 COPY load.lisp utils.lisp openai-utils.lisp http-utils.lisp common.lisp agent.lisp agent-gemini.lisp agent-claude.lisp agent-claudecode.lisp \
 	agent-ollama.lisp agent-deepseek.lisp agent-mistral.lisp agent-chatgpt.lisp .
 COPY agent-run.sh .
+RUN chmod a+x ./agent-run.sh ./prepare-sbcl.sh
 
 COPY skills/ ./skills/
+
+RUN chown -R user:user /agent
+
+# Switch to non-root user
+USER user
 
 # Keep memory.json inside a mountable directory so it survives the container.
 ENV AGENT_MEMORY=/agent/data/memory.json
