@@ -9,6 +9,8 @@ API_KEY_MISTRAL=$(gpg -d ~/.authinfo.gpg 2> /dev/null | awk '/^machine api.mistr
 CLAUDE_CODE_OAUTH_TOKEN=$(gpg -d ~/.authinfo.gpg 2> /dev/null | awk '/^machine claude-code/ {print $6}')
 API_KEY_OPENAI=$(gpg -d ~/.authinfo.gpg 2> /dev/null | awk '/^machine api.openai.com/ {print $6}')
 
+mkdir -p "$(pwd)/home"
+
 # --network=host \
 
 # lisp-agent hands EVAL to an unsupervised model, so nothing in its own
@@ -65,7 +67,7 @@ docker run -it --rm \
 	   --network "$NETWORK" \
 	   -e KEYPROXY_URL=http://keyproxy:8080 \
 	   -e CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN \
+	   -v "$(pwd)/home:/home/user" \
 	   -v "$(pwd)/data:/agent/data" \
 	   -v "$(pwd)/skills:/agent/skills" \
-	   -v "$HOME/src:/agent/data/src/" \
 	   lisp-agent

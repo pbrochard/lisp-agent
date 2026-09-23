@@ -33,14 +33,17 @@ ARG UID=1000
 ARG GID=1000
 
 # Create group and user
-RUN groupadd -g $GID agentuser && \
-    useradd -m -u $UID -g $GID agentuser
+RUN groupadd -g $GID user && \
+    useradd -m -u $UID -g $GID user
+
+WORKDIR /
+RUN chown -R user:user /home/user
 
 WORKDIR /agent
-RUN chown -R agentuser:agentuser /agent
+RUN chown -R user:user /agent
 
 # Switch to non-root user
-USER agentuser
+USER user
 
 ## Quicklisp, installed non-interactively and wired into the SBCL init file.
 COPY prepare-sbcl.sh .
