@@ -17,8 +17,9 @@
 FROM debian:trixie-slim
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends sbcl ca-certificates curl rlwrap build-essential git lynx nodejs poppler-utils \
- && rm -rf /var/lib/apt/lists/*
+	&& apt-get install -y --no-install-recommends sbcl ca-certificates curl rlwrap build-essential git jq vim \
+	lynx nodejs node-corepack node-gyp poppler-utils faketime openjdk-21-jdk-headless \
+	&& rm -rf /var/lib/apt/lists/*
 
 RUN corepack enable
 
