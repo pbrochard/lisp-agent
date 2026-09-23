@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-STATUS_FILE="./data/status"
+STATUS_FILE="/agent/data/status"
 
 function finish {
 	rm -f $STATUS_FILE
@@ -16,4 +16,4 @@ echo "[AI]" > $STATUS_FILE
 # To filter out colors:
 #   `tail -F session-out.log | ansifilter`
 #   `ansifilter session-out.log > session-out-mono.log`
-script -q -f -c "rlwrap -r -i -b '()' --no-warnings sbcl --load load.lisp --eval '(in-package :common)'" ./data/session-out.log
+script -q -f -c "rlwrap -r -i -b '()' --no-warnings sbcl --load load.lisp --eval '(in-package :common)'" /agent/data/session-out.log

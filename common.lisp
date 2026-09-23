@@ -118,7 +118,7 @@ says which agent it came up on. Returns the package now current."
      ("ep"   . "edit the pending prompt")
      ("enp"  . "edit a fresh prompt (discard any pending one)")
      ("rp"   . "run the pending prompt as it stands")
-     ("p"    . "edit the prompt, then run it")
+     ("p"    . "edit the prompt, then run it (type `!no!` in the prompt to prevent running)")
      ("np"   . "edit a fresh prompt, then run it")
      ("r"    . "alias of np"))
     ("Models"
@@ -270,10 +270,10 @@ agent-claudecode's own session file alongside its memory."
   (funcall *current-run-fn* prompt))
 
 (defun memo ()
-  (run "Write down in the ./data/knowledge.md file what you have learned so far to share it with other IA. Acknowledge and output nothing else."))
+  (run "Write down in the /agent/data/knowledge.md file what you have learned so far to share it with other IA. Acknowledge and output nothing else."))
 
 (defun learn-from-knowledge ()
-  (run "Learn what you should know so far from the file ./data/knowledge.md. Acknowledge and output nothing else."))
+  (run "Learn what you should know so far from the file /agent/data/knowledge.md. Acknowledge and output nothing else."))
 
 (defun learn-from-skill (skill)
   (let ((skill-str (string-downcase skill)))
@@ -301,7 +301,7 @@ SET-STATUS."
     (short (if (recall-agent) (package-name (recall-agent)) default))))
 
 (defun set-status (status)
-  (with-open-file (out "./data/status" :direction :output :if-exists :supersede)
+  (with-open-file (out "/agent/data/status" :direction :output :if-exists :supersede)
 	(format out "[AI:~a:~a~a]" (recorded-agent-name) *current-model* status)))
 
 ;; Prompt helpers
