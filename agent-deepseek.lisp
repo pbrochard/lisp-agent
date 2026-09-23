@@ -13,22 +13,23 @@
 ;;;;   (agent:run "What is my name?")   ; => it remembers
 ;;;;   (agent:forget)                   ; wipe the slate
 
-(defpackage :agent
-  (:use :cl :utils :http-utils :common)
-  (:export #:run #:use #:forget #:usage)
-  (:nicknames :a :ag))
+(defpackage :agent-deepseek
+  (:use :cl :utils :http-utils :openai-utils :common)
+  (:export #:run #:use #:forget #:list-models #:*models* #:lm #:llm #:set-model #:usage)
+  (:nicknames :ds :deepseek))
 
-(in-package :agent)
+(in-package :agent-deepseek)
 
-(defparameter *endpoint* (proxy-url "openrouter/api/v1/chat/completions"))
-;;(defparameter *model* "anthropic/claude-sonnet-4.5")
-(defparameter *model* "google/gemma-4-31B-it")
+(defparameter *endpoint* (proxy-url "deepseek/chat/completions"))
+(defparameter *model* "deepseek-chat")
 
-(defconstant MEMORY-FILE "/agent/data/memory-agent.json")
+(defparameter *models* nil)
 
 (defparameter *last-usage* nil
   "The token usage the last model call reported, kept so USAGE can show
-what a turn cost. NIL until a call has been made.")
+what a turn cost. NIL until a call is made.")
+
+(defconstant MEMORY-FILE "/agent/data/memory-deepseek.json")
 
 ;;; --- the tool: a Lisp REPL ---------------------------------------------
 
@@ -36,34 +37,20 @@ what a turn cost. NIL until a call has been made.")
   (vector
    (obj "type" "function"
         "function"
-        (obj "name" "lisp-eval"
-             "description" "Evaluate a Common Lisp form and return the printed result. Use this for computation, list manipulation, anything."
-             "parameters"
-             (obj "type" "object"
-                  "properties" (obj "form" (obj "type" "string"
-                                                "description" "A single Common Lisp form, e.g. (reduce #'+ (loop for i from 1 to 100 collect i))"))
-                  "required" (vector "form"))))))
-
-(defun execute (tool-call)
-  "Turn one tool-call from the model into a tool-result message."
-  (let* ((name (ref tool-call "function" "name"))
-         (args (shasht:read-json (ref tool-call "function" "arguments")))
-         (result (if (string= name "lisp-eval")
-                     (lisp-eval (gethash "form" args))
-                     (format nil "ERROR: unknown tool ~a" name))))
-    (format t "~&  ⤷ ~a~&    => ~a~%" (grey (gethash "form" args)) (grey result))
-    (obj "role" "tool"
-         "tool_call_id" (gethash "id" tool-call)
-         "content" result)))
+        (obj "name" (lisp-eval-tool-name)
+             "description" (lisp-eval-tool-description)
+             "parameters" (lisp-eval-tool-parameters)))))
 
 ;;; --- talking to the model ----------------------------------------------
 
 (defun call-model (messages)
   (http-post-json
    *endpoint*
-   '(("Content-Type" . "application/json"))
+   '(("content-type" . "application/json"))
    (obj "model" *model*
-        "messages" (coerce messages 'vector)
+        "messages" (coerce (cons (obj "role" "system" "content" system-prompt)
+                                 messages)
+                           'vector)
         "tools" *tools*)))
 
 ;;; --- the loop itself ----------------------------------------------------
@@ -72,8 +59,7 @@ what a turn cost. NIL until a call has been made.")
 ;;; for tools, we run them, and recur with the enriched history.
 
 (defun agent-loop (messages)
-  "Returns the complete message history, final answer included.
-The answer is just (gethash \"content\" (car (last messages)))."
+  "Returns the complete message history, final answer included."
   (let* ((response (call-model messages))
          (message (ref response "choices" 0 "message"))
          (tool-calls (gethash "tool_calls" message)))
@@ -85,21 +71,8 @@ The answer is just (gethash \"content\" (car (last messages)))."
         (append messages (list message)))))
 
 ;;; --- entry point ------------------------------------------------------------
+
 (defun use () nil)
-
-;;; --- usage & token reporting ------------------------------------------
-;;; OpenRouter answers in the OpenAI-compatible shape, so a call's token
-;;; counts come back in the response's USAGE object. The account balance
-;;; lives with whichever provider OpenRouter routed to and is not exposed
-;;; here, so this reports what a call cost, not what is left.
-
-(defun usage (&optional date)
-  "Report usage. The last model call's token counts come first, when there was
-one -- what that turn cost. OpenRouter exposes no account balance through
-this API, so there is nothing to add the way DeepSeek and OpenAI allow.
-DATE is accepted so (usage) is uniform across agents and ignored."
-  (declare (ignore date))
-  (openai-utils:print-usage-tokens *last-usage*))
 
 (defun run (prompt)
   (use)
@@ -118,11 +91,47 @@ DATE is accepted so (usage) is uniform across agents and ignored."
   (setf *current-run-fn* #'run
 		*current-model* *model*
 		*memory-file* (pathname MEMORY-FILE)
-		*system-message* (list (obj "role" "system"
-									"content" SYSTEM-PROMPT)))
-  (remember-agent "AGENT")
+		*system-message* '())
+  (remember-agent "AGENT-DEEPSEEK")
   (set-status STATUS-OK)
   *model*)
 
 (defun forget ()
   (forget-mem MEMORY-FILE))
+
+(defun list-models ()
+  (unless *models*
+    (setf *models*
+            (gethash "data"
+                     (http-get-json (proxy-url "deepseek/models")
+                                    :headers '(("content-type" . "application/json")))))))
+
+(defun lm ()
+  (list-models)
+  (print-model-ids *models*))
+
+(defun llm ()
+  (list-models)
+  (loop for p across *models*
+		for index from 1
+		do
+		   (maphash (lambda (k v)
+					  (format t "~&~a~a: ~a~%"
+							  (if (string-equal k "id") (format nil "[~a] " index) "")
+							  k v))
+					p)
+		   (format t "~&__________~%")))
+
+(defun set-model (num)
+  (list-models)
+  (setf *model* (model-id *models* num))
+  (use))
+
+(defun usage (&optional date)
+  "Report this account's usage. The last model call's token counts come
+first, when there was one, then GET-USAGE's account report -- here the
+provider's balance. DATE is accepted so (usage) is uniform across agents
+and ignored: DeepSeek's balance is not per-day."
+  (declare (ignore date))
+  (openai-utils:print-usage-tokens *last-usage*)
+  (openai-utils:get-usage :deepseek))

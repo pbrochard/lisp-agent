@@ -4,7 +4,7 @@ This fork exists because the single-file version is small enough to read end to 
 
 ## The `hocwp` branch
 
-[`hocwp`](../../tree/hocwp) branch grows this ~100-line demo into a working agent: four interchangeable backends behind one `(run ...)` — OpenRouter, the Anthropic API, Gemini, Ollama and the Claude Code CLI — each with its own memory, plus REPL tooling (prompt editing, live tool traces, usage and cost reporting, skills).
+[`hocwp`](../../tree/hocwp) branch grows this ~100-line demo into a working agent: interchangeable backends behind one `(run ...)` — OpenRouter, the Anthropic API, Gemini, DeepSeek, Ollama, OpenAI, and the Claude Code CLI — each with its own memory, plus REPL tooling (prompt editing, live tool traces, usage and cost reporting, skills).
 Where `main` is the idea stripped to its essentials, `hocwp` is the version used daily, and it trades the demo's restraint for reach: `bypassPermissions`, mounted host sources, real credentials in the environment.
 It is container-only as a result — `./build.sh` then `./run.sh`, never on your host; pair it with [home-docker](https://github.com/pbrochard/home-docker) to give it a disposable `$HOME` of its own.
 

@@ -14,29 +14,52 @@
 #   (agent:run "My name is Jamie.")
 #   (agent:forget)
 
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends sbcl ca-certificates curl \
+ && apt-get install -y --no-install-recommends sbcl ca-certificates curl rlwrap build-essential git lynx nodejs poppler-utils \
  && rm -rf /var/lib/apt/lists/*
 
-# Quicklisp, installed non-interactively and wired into the SBCL init file.
-RUN curl -sO https://beta.quicklisp.org/quicklisp.lisp \
- && sbcl --non-interactive \
-         --load quicklisp.lisp \
-         --eval '(quicklisp-quickstart:install)' \
-         --eval '(ql-util:without-prompting (ql:add-to-init-file))' \
- && rm quicklisp.lisp
+RUN corepack enable
 
-# Bake the dependencies into the image so startup is instant.
-RUN sbcl --non-interactive --eval '(ql:quickload (list :dexador :shasht) :silent t)'
+# Claude Code CLI, for agent-claudecode.lisp (subscription auth, no API key).
+RUN corepack npm install -g @anthropic-ai/claude-code
+
+COPY data/debs/* /debs/
+RUN dpkg -i /debs/*.deb
+
+# Accept build arguments
+ARG UID=1000
+ARG GID=1000
+
+# Create group and user
+RUN groupadd -g $GID user && \
+    useradd -m -u $UID -g $GID user
+
+WORKDIR /
+RUN chown -R user:user /home/user
 
 WORKDIR /agent
-COPY agent.lisp .
+
+## Quicklisp, installed non-interactively and wired into the SBCL init file.
+COPY prepare-sbcl.sh .
+
+COPY load.lisp utils.lisp openai-utils.lisp http-utils.lisp common.lisp agent.lisp agent-gemini.lisp agent-claude.lisp agent-claudecode.lisp \
+	agent-ollama.lisp agent-deepseek.lisp agent-mistral.lisp agent-chatgpt.lisp .
+COPY agent-run.sh .
+RUN chmod a+x ./agent-run.sh ./prepare-sbcl.sh
+
+COPY skills/ ./skills/
+
+RUN chown -R user:user /agent
+
+# Switch to non-root user
+USER user
 
 # Keep memory.json inside a mountable directory so it survives the container.
 ENV AGENT_MEMORY=/agent/data/memory.json
 RUN mkdir -p /agent/data
 
 # Load the agent and drop you at a live REPL. This is the "login".
-ENTRYPOINT ["sbcl", "--load", "agent.lisp"]
+#ENTRYPOINT ["sbcl", "--load", "agent.lisp"]
+ENTRYPOINT ["/agent/agent-run.sh"]
