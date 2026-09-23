@@ -8,5 +8,7 @@ curl -sO https://beta.quicklisp.org/quicklisp.lisp \
 			--eval '(ql-util:without-prompting (ql:add-to-init-file))' \
 	&& rm quicklisp.lisp
 
-# Bake the dependencies into the image so startup is instant.
-sbcl --non-interactive --eval '(ql:quickload (list :dexador :shasht :local-time) :silent t)'
+# Bake the dependencies into the image so startup needs no network: since
+# lisp-agent now runs on a Docker network with no route to the internet (see
+# run.sh, keyproxy/), anything load.lisp quickloads has to already be here.
+sbcl --non-interactive --eval '(ql:quickload (list :dexador :shasht :cl-ansi-text :local-time) :silent t)'

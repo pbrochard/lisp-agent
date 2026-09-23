@@ -37,19 +37,21 @@
     (declare (ignore s m h))
     (format nil "~4,'0d-~2,'0d-~2,'0d" year month day)))
 
-(defun usage-get (url api-key &key query)
-  "GET URL with a bearer API-KEY (a query string appended when given), and
-return the parsed JSON. Kept here rather than in http-utils because it is
-the one call these usage endpoints have in common."
-  (shasht:read-json
-   (dex:get (if query (format nil "~a?~a" url query) url)
-            :headers `(("Authorization" . ,(format nil "Bearer ~a" api-key))))))
+(defun usage-get (path &key query)
+  "GET keyproxy's PATH (a query string appended when given), and return the
+parsed JSON. Goes through keyproxy like every other provider call -- these
+account endpoints want the same key as the chat completions they report on,
+and that key never lives in this process. Kept here rather than in
+http-utils because it is the one call these usage endpoints have in common."
+  (http-utils:http-get-json
+   (let ((url (http-utils:proxy-url path)))
+     (if query (format nil "~a?~a" url query) url))))
 
 ;;; DeepSeek: one balance endpoint, no dates.
 
-(defun deepseek-balance (api-key)
+(defun deepseek-balance ()
   "DeepSeek's /user/balance payload: IS_AVAILABLE plus BALANCE_INFOS."
-  (usage-get "https://api.deepseek.com/user/balance" api-key))
+  (usage-get "deepseek/user/balance"))
 
 (defun print-deepseek-usage (balance)
   (format t "~&Balance:~%")
@@ -65,10 +67,9 @@ the one call these usage endpoints have in common."
 ;;; instead, but it needs an admin-scoped key (api.usage.read) a normal key
 ;;; lacks, so the plain /v1/usage is what we can actually read.
 
-(defun openai-usage (api-key &key (date (today-string)))
+(defun openai-usage (&key (date (today-string)))
   "OpenAI's /v1/usage for DATE, a list of per-model token buckets."
-  (gethash "data" (usage-get "https://api.openai.com/v1/usage" api-key
-                              :query (format nil "date=~a" date))))
+  (gethash "data" (usage-get "openai/v1/usage" :query (format nil "date=~a" date))))
 
 (defun print-openai-usage (data &key (date (today-string)))
   (if (and data (plusp (length data)))
@@ -87,9 +88,9 @@ the one call these usage endpoints have in common."
 ;;; Mistral: no balance or usage endpoint exists for an API key, so the
 ;;; best available is who the key belongs to.
 
-(defun mistral-account (api-key)
+(defun mistral-account ()
   "Mistral's /v1/users/me payload: account, workspace and organization."
-  (usage-get "https://api.mistral.ai/v1/users/me" api-key))
+  (usage-get "mistral/v1/users/me"))
 
 (defun print-mistral-usage (account)
   ;; shasht parses a JSON null as the truthy keyword :NULL, so a missing
@@ -105,16 +106,17 @@ the one call these usage endpoints have in common."
       (when org (format t "  organization: ~a~%" (gethash "name" org)))
       (format t "  (Mistral exposes no balance or usage over the API.)~%"))))
 
-(defun get-usage (provider api-key &key date)
+(defun get-usage (provider &key date)
   "Report what PROVIDER -- :DEEPSEEK, :OPENAI or :MISTRAL -- says about the
-account API-KEY belongs to: balance, token usage or identity, whichever
-that provider exposes. DATE, an ISO \"YYYY-MM-DD\" string, picks the day for
-OpenAI's per-day usage (today by default). Prints a short report and
-returns the raw parsed reply, so a caller can also use it in code."
+account behind keyproxy's key for it: balance, token usage or identity,
+whichever that provider exposes. DATE, an ISO \"YYYY-MM-DD\" string, picks
+the day for OpenAI's per-day usage (today by default). Prints a short
+report and returns the raw parsed reply, so a caller can also use it in
+code."
   (let ((reply (ecase provider
-                 (:deepseek (deepseek-balance api-key))
-                 (:openai   (openai-usage api-key :date (or date (today-string))))
-                 (:mistral  (mistral-account api-key)))))
+                 (:deepseek (deepseek-balance))
+                 (:openai   (openai-usage :date (or date (today-string))))
+                 (:mistral  (mistral-account)))))
     (format t "~&~a~%" +usage-separator+)
     (ecase provider
       (:deepseek (print-deepseek-usage reply))

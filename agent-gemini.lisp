@@ -4,7 +4,7 @@
 ;;;; the model writes Lisp, the loop runs it, the result flows back.
 ;;;;
 ;;;; Usage:
-;;;;   export API_KEY=...
+;;;;   export KEYPROXY_URL=http://keyproxy:8080   ; see keyproxy/, run.sh
 ;;;;   sbcl --load agent.lisp --eval '(agent:run "What is the 30th Fibonacci number? Compute it.")'
 ;;;;
 ;;;; Memory: the full conversation persists to memory.json between runs.
@@ -20,10 +20,9 @@
 
 (in-package :agent-gemini)
 
-(defparameter *endpoint* "https://generativelanguage.googleapis.com/v1beta/models/")
+(defparameter *endpoint* (proxy-url "gemini/v1beta/models/"))
 (defparameter *model* "gemini-3.5-flash")
 ;;(defparameter *model* "gemini-3.1-pro-preview")
-(defparameter *api-key* (uiop:getenv "API_KEY_GEMINI"))
 
 (defparameter *models* nil)
 
@@ -58,8 +57,7 @@ what a turn cost. NIL until a call has been made.")
 (defun call-model (contents)
   (http-post-json
    (format nil "~a~a:generateContent" *endpoint* *model*)
-   `(("x-goog-api-key" . ,*api-key*)
-     ("content-type" . "application/json"))
+   '(("content-type" . "application/json"))
    (obj "system_instruction" (obj "parts" (vector (obj "text" system-prompt)))
         "contents" (coerce contents 'vector)
         "tools" *tools*)))
@@ -169,7 +167,7 @@ agents and ignored."
     (setf *models*
             (gethash "models"
                      (http-get-json
-                      (format nil "https://generativelanguage.googleapis.com/v1beta/models?key=~a" *api-key*)
+                      (proxy-url "gemini/v1beta/models")
                       :headers '(("content-type" . "application/json")))))))
 
 (defun lm ()

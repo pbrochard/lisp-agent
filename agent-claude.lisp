@@ -4,7 +4,7 @@
 ;;;; the model writes Lisp, the loop runs it, the result flows back.
 ;;;;
 ;;;; Usage:
-;;;;   export API_KEY=sk-ant-...
+;;;;   export KEYPROXY_URL=http://keyproxy:8080   ; see keyproxy/, run.sh
 ;;;;   sbcl --load agent.lisp --eval '(agent:run "What is the 30th Fibonacci number? Compute it.")'
 ;;;;
 ;;;; Memory: the full conversation persists to memory.json between runs.
@@ -20,9 +20,8 @@
 
 (in-package :agent-claude)
 
-(defparameter *endpoint* "https://api.anthropic.com/v1/messages")
+(defparameter *endpoint* (proxy-url "anthropic/v1/messages"))
 (defparameter *model* "claude-sonnet-5")
-(defparameter *api-key* (uiop:getenv "API_KEY_CLAUDE"))
 (defparameter *max-tokens* 4096)
 (defparameter *api-version* "2023-06-01")
 
@@ -57,8 +56,7 @@ what a turn cost. NIL until a call has been made.")
 (defun call-model (messages)
   (http-post-json
    *endpoint*
-   `(("x-api-key" . ,*api-key*)
-     ("anthropic-version" . ,*api-version*)
+   `(("anthropic-version" . ,*api-version*)
      ("content-type" . "application/json"))
    (obj "model" *model*
         "max_tokens" *max-tokens*
@@ -176,10 +174,9 @@ balance to add the way the OpenAI-compatible agents do. DATE is accepted so
   (unless *models*
     (setf *models*
             (gethash "data"
-                     (http-get-json "https://api.anthropic.com/v1/models"
+                     (http-get-json (proxy-url "anthropic/v1/models")
                                     :headers `(("content-type" . "application/json")
-                                               ("anthropic-version" . ,*api-version*)
-                                               ("X-Api-Key" . ,*api-key*)))))))
+                                               ("anthropic-version" . ,*api-version*)))))))
 
 (defun lm ()
   (list-models)

@@ -4,7 +4,7 @@
 ;;;; the model writes Lisp, the loop runs it, the result flows back.
 ;;;;
 ;;;; Usage:
-;;;;   export API_KEY_DEEPSEEK=sk-...
+;;;;   export KEYPROXY_URL=http://keyproxy:8080   ; see keyproxy/, run.sh
 ;;;;   sbcl --load agent.lisp --eval '(agent:run "What is the 30th Fibonacci number? Compute it.")'
 ;;;;
 ;;;; Memory: the full conversation persists to memory.json between runs.
@@ -20,9 +20,8 @@
 
 (in-package :agent-deepseek)
 
-(defparameter *endpoint* "https://api.deepseek.com/chat/completions")
+(defparameter *endpoint* (proxy-url "deepseek/chat/completions"))
 (defparameter *model* "deepseek-chat")
-(defparameter *api-key* (uiop:getenv "API_KEY_DEEPSEEK"))
 
 (defparameter *models* nil)
 
@@ -47,8 +46,7 @@ what a turn cost. NIL until a call is made.")
 (defun call-model (messages)
   (http-post-json
    *endpoint*
-   `(("Authorization" . ,(format nil "Bearer ~a" *api-key*))
-     ("content-type" . "application/json"))
+   '(("content-type" . "application/json"))
    (obj "model" *model*
         "messages" (coerce (cons (obj "role" "system" "content" system-prompt)
                                  messages)
@@ -105,9 +103,8 @@ what a turn cost. NIL until a call is made.")
   (unless *models*
     (setf *models*
             (gethash "data"
-                     (http-get-json "https://api.deepseek.com/models"
-                                    :headers `(("content-type" . "application/json")
-                                               ("Authorization" . ,(format nil "Bearer ~a" *api-key*))))))))
+                     (http-get-json (proxy-url "deepseek/models")
+                                    :headers '(("content-type" . "application/json")))))))
 
 (defun lm ()
   (list-models)
@@ -137,4 +134,4 @@ provider's balance. DATE is accepted so (usage) is uniform across agents
 and ignored: DeepSeek's balance is not per-day."
   (declare (ignore date))
   (openai-utils:print-usage-tokens *last-usage*)
-  (openai-utils:get-usage :deepseek *api-key*))
+  (openai-utils:get-usage :deepseek))

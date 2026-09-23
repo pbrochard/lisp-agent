@@ -1,0 +1,66 @@
+# keyproxy — the only place a real provider API key exists as plaintext.
+#
+# lisp-agent hands EVAL to an unsupervised model, so anything in its process
+# environment is something that model can read and try to exfiltrate. It
+# therefore never holds a raw key: it calls http://keyproxy:8080/<provider>/...
+# and this proxy injects the one credential pinned to that one upstream host,
+# discarding whatever Authorization/x-api-key header the client sent instead
+# of merging it. A provider not listed below is refused outright, and
+# lisp-agent's container has no network route anywhere except here (see
+# run.sh) -- so a foreign key can be smuggled to an *allowed* destination at
+# most, never to arbitrary attacker infrastructure.
+#
+# $API_KEY_* are substituted from the container's environment at startup by
+# the nginx image's built-in envsubst-on-templates mechanism; nothing else in
+# this file looks like an environment variable, so nothing else is touched.
+
+server {
+    listen 8080;
+
+    client_max_body_size 20m;
+    proxy_connect_timeout 10s;
+    proxy_read_timeout 300s;
+    proxy_ssl_server_name on;
+
+    location /anthropic/ {
+        proxy_set_header Authorization "";
+        proxy_set_header x-api-key "$API_KEY_CLAUDE";
+        proxy_set_header Host api.anthropic.com;
+        proxy_pass https://api.anthropic.com/;
+    }
+
+    location /gemini/ {
+        proxy_set_header Authorization "";
+        proxy_set_header x-goog-api-key "$API_KEY_GEMINI";
+        proxy_set_header Host generativelanguage.googleapis.com;
+        proxy_pass https://generativelanguage.googleapis.com/;
+    }
+
+    location /openrouter/ {
+        proxy_set_header Authorization "Bearer $API_KEY_OPENROUTER";
+        proxy_set_header Host openrouter.ai;
+        proxy_pass https://openrouter.ai/;
+    }
+
+    location /deepseek/ {
+        proxy_set_header Authorization "Bearer $API_KEY_DEEPSEEK";
+        proxy_set_header Host api.deepseek.com;
+        proxy_pass https://api.deepseek.com/;
+    }
+
+    location /mistral/ {
+        proxy_set_header Authorization "Bearer $API_KEY_MISTRAL";
+        proxy_set_header Host api.mistral.ai;
+        proxy_pass https://api.mistral.ai/;
+    }
+
+    location /openai/ {
+        proxy_set_header Authorization "Bearer $API_KEY_OPENAI";
+        proxy_set_header Host api.openai.com;
+        proxy_pass https://api.openai.com/;
+    }
+
+    location / {
+        return 403;
+    }
+}

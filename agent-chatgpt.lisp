@@ -4,7 +4,7 @@
 ;;;; the model writes Lisp, the loop runs it, the result flows back.
 ;;;;
 ;;;; Usage:
-;;;;   export API_KEY_OPENAI=sk-...
+;;;;   export KEYPROXY_URL=http://keyproxy:8080   ; see keyproxy/, run.sh
 ;;;;   sbcl --load load.lisp --eval '(chatgpt:run "What is the 30th Fibonacci number? Compute it.")'
 ;;;;
 ;;;; Memory: the full conversation persists to memory.json between runs.
@@ -20,9 +20,8 @@
 
 (in-package :agent-chatgpt)
 
-(defparameter *endpoint* "https://api.openai.com/v1/chat/completions")
+(defparameter *endpoint* (proxy-url "openai/v1/chat/completions"))
 (defparameter *model* "gpt-5.5")
-(defparameter *api-key* (uiop:getenv "API_KEY_OPENAI"))
 
 (defparameter *models* nil)
 
@@ -47,8 +46,7 @@ what a turn cost. NIL until a call is made.")
 (defun call-model (messages)
   (http-post-json
    *endpoint*
-   `(("Authorization" . ,(format nil "Bearer ~a" *api-key*))
-     ("content-type" . "application/json"))
+   '(("content-type" . "application/json"))
    (obj "model" *model*
         "messages" (coerce (cons (obj "role" "system" "content" system-prompt)
                                  messages)
@@ -105,9 +103,8 @@ what a turn cost. NIL until a call is made.")
   (unless *models*
     (setf *models*
             (gethash "data"
-                     (http-get-json "https://api.openai.com/v1/models"
-                                    :headers `(("content-type" . "application/json")
-                                               ("Authorization" . ,(format nil "Bearer ~a" *api-key*))))))))
+                     (http-get-json (proxy-url "openai/v1/models")
+                                    :headers '(("content-type" . "application/json")))))))
 
 (defun lm ()
   (list-models)
@@ -136,4 +133,4 @@ first, when there was one -- what that turn cost -- then GET-USAGE's
 account report: the provider's own balance, daily tokens or identity.
 DATE, a \"YYYY-MM-DD\" string, picks the day and defaults to today."
   (openai-utils:print-usage-tokens *last-usage*)
-  (openai-utils:get-usage :openai *api-key* :date date))
+  (openai-utils:get-usage :openai :date date))

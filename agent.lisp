@@ -4,7 +4,7 @@
 ;;;; the model writes Lisp, the loop runs it, the result flows back.
 ;;;;
 ;;;; Usage:
-;;;;   export OPENROUTER_API_KEY=sk-or-...
+;;;;   export KEYPROXY_URL=http://keyproxy:8080   ; see keyproxy/, run.sh
 ;;;;   sbcl --load agent.lisp --eval '(agent:run "What is the 30th Fibonacci number? Compute it.")'
 ;;;;
 ;;;; Memory: the full conversation persists to memory.json between runs.
@@ -20,10 +20,9 @@
 
 (in-package :agent)
 
-(defparameter *endpoint* "https://openrouter.ai/api/v1/chat/completions")
+(defparameter *endpoint* (proxy-url "openrouter/api/v1/chat/completions"))
 ;;(defparameter *model* "anthropic/claude-sonnet-4.5")
 (defparameter *model* "google/gemma-4-31B-it")
-(defparameter *api-key* (uiop:getenv "API_KEY_OPENROUTER"))
 
 (defconstant MEMORY-FILE "/agent/data/memory-agent.json")
 
@@ -62,8 +61,7 @@ what a turn cost. NIL until a call has been made.")
 (defun call-model (messages)
   (http-post-json
    *endpoint*
-   `(("Authorization" . ,(format nil "Bearer ~a" *api-key*))
-     ("Content-Type" . "application/json"))
+   '(("Content-Type" . "application/json"))
    (obj "model" *model*
         "messages" (coerce messages 'vector)
         "tools" *tools*)))

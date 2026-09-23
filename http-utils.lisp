@@ -1,8 +1,25 @@
 (defpackage :http-utils
   (:use :cl)
-  (:export #:http-post-json #:http-get-json))
+  (:export #:http-post-json #:http-get-json #:proxy-url))
 
 (in-package :http-utils)
+
+;;; --- keyproxy -------------------------------------------------------------
+;;; No agent holds a real provider API key: EVAL is a tool handed to an
+;;; unsupervised model, so anything in this process's environment is
+;;; something that model can read and try to exfiltrate. Every provider call
+;;; instead goes to the keyproxy sidecar, which holds the real keys, injects
+;;; the right one for the one upstream host it forwards to, and refuses
+;;; everything else. See run.sh and keyproxy/.
+
+(defparameter *keyproxy-url* (uiop:getenv "KEYPROXY_URL")
+  "Base URL of the keyproxy sidecar, e.g. \"http://keyproxy:8080\".")
+
+(defun proxy-url (path)
+  "PATH (e.g. \"anthropic/v1/messages\") resolved against *KEYPROXY-URL*."
+  (unless *keyproxy-url*
+    (error "KEYPROXY_URL is not set -- agents talk to providers through keyproxy, never directly."))
+  (format nil "~a/~a" *keyproxy-url* path))
 
 ;;; --- thin JSON-over-HTTP helpers ---------------------------------------
 ;;; Every agent's CALL-MODEL and LIST-MODELS do the same three things:
