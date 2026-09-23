@@ -656,8 +656,11 @@ written whole is never redrawn."
                      (write-tracked! (render-streamed whole-lines grey) whole-lines)))
                  (setf pending-line (if line-end (subseq buffered (1+ line-end)) buffered))))
              (flush-pending-line! ()
+               "Terminate the held-back line as it goes out: left unfinished,
+rlwrap would redraw it as a prompt (see WRITE-WHOLE-LINES!)."
                (unless (zerop (length pending-line))
-                 (write-tracked! (render-streamed pending-line pending-line-grey) pending-line)
+                 (let ((line (concatenate 'string pending-line (string #\Newline))))
+                   (write-tracked! (render-streamed line pending-line-grey) line))
                  (setf pending-line "")))
              (flush-streamed-text! ()
                "Put out what the text stream still holds back, for output that
