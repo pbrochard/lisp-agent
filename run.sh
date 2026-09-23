@@ -1,5 +1,7 @@
 #! /bin/bash
 
+ENTRYPOINT=$1
+
 API_KEY_CLAUDE=$(gpg -d ~/.authinfo.gpg 2> /dev/null | awk '/api.anthropic.com/ {print $6}')
 API_KEY_GEMINI=$(gpg -d ~/.authinfo.gpg 2> /dev/null | awk '/^machine generativelanguage.googleapis.com/ {print $6}')
 API_KEY_OPENROUTER=$(gpg -d ~/.authinfo.gpg 2> /dev/null | awk '/^machine openrouter.ai/ {print $6}')
@@ -67,6 +69,7 @@ docker run -it --rm \
 	   --network "$NETWORK" \
 	   -e KEYPROXY_URL=http://keyproxy:8080 \
 	   -e CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN \
+	   -e ENTRYPOINT=$ENTRYPOINT \
 	   -v "$(pwd)/home:/home/user" \
 	   -v "$(pwd)/data:/agent/data" \
 	   -v "$(pwd)/skills:/agent/skills" \
