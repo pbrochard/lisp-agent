@@ -935,7 +935,6 @@ carries no rate-limit payload of its own, hence *LAST-RATE-LIMIT*."
 (defun run (prompt)
   (use)
   (set-status STATUS-THINKING)
-  (reset-tool-history)
   (format t "~&______~&~%")
   (multiple-value-bind (on-event flush-remaining-output) (make-stream-printer)
     (multiple-value-bind (text session-id cost rate-limit usage)
@@ -964,7 +963,9 @@ carries no rate-limit payload of its own, hence *LAST-RATE-LIMIT*."
 
 (defun forget ()
   (forget-mem MEMORY-FILE)
-  (when (probe-file SESSION-FILE) (delete-file SESSION-FILE)))
+  (reset-tool-history)
+  (when (probe-file SESSION-FILE)
+	(delete-file SESSION-FILE)))
 
 (defun list-models ()
   (loop for name across *models*
