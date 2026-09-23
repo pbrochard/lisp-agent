@@ -20,6 +20,7 @@ const server = net.createServer((socket) => {
 		client.end();
 	});
 	client.on('error', (err) => {
+		console.error(`Upstream ${REMOTE_HOST}:${REMOTE_PORT} error: ${err.message}`);
 		socket.end();
 	});
 });
