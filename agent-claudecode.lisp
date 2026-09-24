@@ -43,14 +43,10 @@
 (defparameter *model* "sonnet")
 (defparameter *permission-mode* "bypassPermissions")
 
-;;; The CLI itself has no models endpoint to ask, but once it has run at least
-;;; once under this $HOME it caches the catalog its own model picker reads
-;;; from. DISCOVER-MODELS reads that cache once at load time so *MODELS*
-;;; reflects whatever this account currently has access to; FALLBACK-MODELS
-;;; is the last catalog snapshot known at the time this file was written, used
-;;; when the cache is missing or unreadable (e.g. the CLI has never run under
-;;; this $HOME yet).
+;;; The CLI has no models endpoint. The catalog its model picker caches is the
+;;; closest thing, and it only exists once the CLI has run under this $HOME.
 (defparameter *fallback-models* (vector "sonnet" "opus" "fable" "haiku" "mythos"))
+(defparameter *fallback-efforts* (vector "low" "medium" "high" "xhigh" "max"))
 
 (defun claude-config-dir ()
   (let ((override (sb-ext:posix-getenv "CLAUDE_CONFIG_DIR")))
@@ -62,8 +58,7 @@
   (directory (merge-pathnames "cache/model-catalog/*.json" (claude-config-dir))))
 
 (defun cli-model-catalog ()
-  "The newest cache/model-catalog entry for the CLI's own (\"cc\") surface,
-already parsed by shasht, or NIL if none exists or none parses."
+  "The newest cached catalog for the CLI's own (\"cc\") surface, or NIL."
   (let ((catalogs (loop for file in (model-catalog-cache-files)
                          for parsed = (ignore-errors (with-open-file (in file) (shasht:read-json in)))
                          for catalog = (and parsed (gethash "catalog" parsed))
@@ -71,23 +66,38 @@ already parsed by shasht, or NIL if none exists or none parses."
                            collect parsed)))
     (first (sort catalogs #'> :key (lambda (parsed) (or (gethash "fetchedAt" parsed) 0))))))
 
+(defparameter *cli-model-catalog* (ignore-errors (cli-model-catalog)))
+
+(defun catalog-models (catalog)
+  (gethash "models" (gethash "config" (gethash "catalog" catalog))))
+
+(defun unique-in-order (names)
+  (remove-duplicates names :test #'string= :from-end t))
+
 (defun model-aliases (catalog)
-  (let ((models (gethash "models" (gethash "config" (gethash "catalog" catalog)))))
-    (remove-duplicates
-     (loop for model across models
-           for short-name = (gethash "short_name" model)
-           when short-name collect (string-downcase short-name))
-     :test #'string= :from-end t)))
+  (unique-in-order
+   (loop for model across (catalog-models catalog)
+         for short-name = (gethash "short_name" model)
+         when short-name collect (string-downcase short-name))))
 
-(defun discover-models ()
-  (let* ((catalog (ignore-errors (cli-model-catalog)))
-         (aliases (and catalog (model-aliases catalog))))
-    (if aliases (coerce aliases 'vector) *fallback-models*)))
+(defun model-effort-options (model)
+  (let ((thinking (gethash "thinking" model)))
+    (and thinking (gethash "effort_options" thinking))))
 
-(defparameter *models* (discover-models))
+(defun effort-levels (catalog)
+  (unique-in-order
+   (loop for model across (catalog-models catalog)
+         append (loop for option across (or (model-effort-options model) #())
+                      collect (gethash "id" option)))))
+
+(defun from-cli-catalog-or (extract fallback)
+  (let ((found (and *cli-model-catalog* (ignore-errors (funcall extract *cli-model-catalog*)))))
+    (if found (coerce found 'vector) fallback)))
+
+(defparameter *models* (from-cli-catalog-or #'model-aliases *fallback-models*))
 
 (defparameter *effort* nil)
-(defparameter *efforts* (vector "low" "medium" "high" "xhigh" "max"))
+(defparameter *efforts* (from-cli-catalog-or #'effort-levels *fallback-efforts*))
 
 ;;; stdout (streamed deltas, main thread) and stderr (DRAIN-STDERR, its own
 ;;; thread) share one terminal; without this lock their writes interleave
