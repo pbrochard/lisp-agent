@@ -966,7 +966,7 @@ rate-limit payload of its own, hence *LAST-RATE-LIMIT*."
         (format t "~&~a~%" (strip-terminal-control-chars text))
         (let ((windows (format-windows *last-rate-limit*)))
           (when (plusp (length windows))
-            (format t "~&~a" (grey windows))))
+            (format t "~&~a" (grey-multiline windows))))
         (when context (format t "~&~a~%" (grey context)))))))
 
 (defun run (prompt)
