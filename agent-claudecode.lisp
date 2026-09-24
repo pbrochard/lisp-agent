@@ -907,11 +907,33 @@ creation when present."
               (and cache-read (plusp cache-read) cache-read)
               (and cache-creation (plusp cache-creation) cache-creation)))))
 
+(defparameter +context-window-size+ 200000
+  "Token budget the CLI itself assumes for its own /context report, absent the
+1M-token beta window.")
+
+(defun context-tokens-used (usage)
+  "Prompt tokens the last turn actually spent against the context window: the
+fresh input plus both cache buckets, mirroring how the CLI computes it."
+  (+ (or (gethash "input_tokens" usage) 0)
+     (or (gethash "cache_read_input_tokens" usage) 0)
+     (or (gethash "cache_creation_input_tokens" usage) 0)))
+
+(defun format-context (usage)
+  "One line reporting how much of the context window the last turn's prompt
+filled, e.g. \"Context: 12.3% used (175000 tokens left)\"."
+  (when usage
+    (let* ((used (context-tokens-used usage))
+           (percentage (* 100 (/ used (float +context-window-size+)))))
+      (format nil "Context: ~,1f% used (~a tokens left)"
+              percentage (max 0 (- +context-window-size+ used))))))
+
 (defun format-usage (cost rate-limit usage)
-  (let ((tokens (format-tokens usage)))
+  (let ((tokens (format-tokens usage))
+        (context (format-context usage)))
     (with-output-to-string (s)
       (write-string (format-windows rate-limit) s)
       (when tokens (format s "~a~%" tokens))
+      (when context (format s "~a~%" context))
       (format s "Cost: $~,4f this session" (or cost 0)))))
 
 ;;; --- entry point ------------------------------------------------------------
