@@ -942,23 +942,28 @@ window size is exactly the mistake this replaces."
 ;;; only here so RUN can call USE without a forward reference.
 (defun use () nil)
 
-(defun usage ()
-  "Print the CLI's own /usage report, plus the exact reset countdown from the
-last real call. /usage is answered locally by the CLI rather than by the
-model, so it costs nothing and does not touch the conversation history -- and
-carries no rate-limit payload of its own, hence *LAST-RATE-LIMIT*."
-  (multiple-value-bind (text) (call-claude "/usage" (lambda (event) (declare (ignore event))))
-    (sb-thread:with-mutex (*output-lock*)
-      (format t "~&~a~%" (strip-terminal-control-chars text))
-      (let ((windows (format-windows *last-rate-limit*)))
-        (when (plusp (length windows))
-          (format t "~&~a" (grey windows)))))))
-
 (defun fetch-context-usage ()
   "The CLI's own /context read on the just-resumed session's context-window
 fill. Like /usage, /context is answered locally rather than by the model, so
-this costs nothing and does not touch the conversation history."
+this costs nothing and does not touch the conversation history. Works even
+with no session started yet -- CALL-CLAUDE only adds --resume when there is
+one, so this then just reports a fresh, empty session."
   (nth-value 5 (call-claude "/context" (lambda (event) (declare (ignore event))))))
+
+(defun usage ()
+  "Print the CLI's own /usage report, the exact reset countdown from the last
+real call, and the current context-window fill. /usage and /context are both
+answered locally by the CLI rather than by the model, so this costs nothing
+and does not touch the conversation history -- and /usage carries no
+rate-limit payload of its own, hence *LAST-RATE-LIMIT*."
+  (multiple-value-bind (text) (call-claude "/usage" (lambda (event) (declare (ignore event))))
+    (let ((context (format-context (fetch-context-usage))))
+      (sb-thread:with-mutex (*output-lock*)
+        (format t "~&~a~%" (strip-terminal-control-chars text))
+        (let ((windows (format-windows *last-rate-limit*)))
+          (when (plusp (length windows))
+            (format t "~&~a" (grey windows))))
+        (when context (format t "~&~a~%" (grey context)))))))
 
 (defun run (prompt)
   (use)
