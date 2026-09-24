@@ -1,6 +1,6 @@
 (defpackage :utils
   (:use :cl :cl-ansi-text)
-  (:export #:grey #:obj #:hash-table-keys #:hash-table-values #:obj-to-string #:lisp-eval #:run-lisp-eval-tool #:lisp-eval-tool-name #:lisp-eval-tool-description #:lisp-eval-tool-parameters #:replace-all #:ref #:remove-prefix))
+  (:export #:grey #:obj #:hash-table-keys #:hash-table-values #:obj-to-string #:lisp-eval #:run-lisp-eval-tool #:lisp-eval-tool-name #:lisp-eval-tool-description #:lisp-eval-tool-parameters #:replace-all #:ref #:remove-prefix #:round-to-1-decimal #:format-count))
 
 (in-package :utils)
 
@@ -105,6 +105,25 @@ almost everywhere truecolor might silently fail."
              (string= prefix string :end2 len-p))
         (subseq string len-p) ; Return string starting after the prefix
         string)))             ; Return the original string untouched
+
+;;; --- numeric helpers -----------------------------------------------------
+
+(defun round-to-1-decimal (x)
+  (/ (round (* x 10)) 10.0))
+
+(defun format-count (n)
+  "N as a human-readable count, e.g. 1000000 => \"1M\", 985882 => \"985.9K\",
+342 => \"342\". Mirrors how the Claude Code CLI abbreviates its own token
+counts in its /context report."
+  (flet ((trimmed (x)
+           (let ((r (round-to-1-decimal x)))
+             (if (= r (round r))
+                 (format nil "~d" (round r))
+                 (format nil "~,1f" r)))))
+    (cond
+      ((>= n 1000000) (format nil "~aM" (trimmed (/ n 1000000.0))))
+      ((>= n 1000) (format nil "~aK" (trimmed (/ n 1000.0))))
+      (t (format nil "~d" n)))))
 
 ;;; --- nested access helper ----------------------------------------------
 ;;; Walk nested hash tables / vectors. shasht reads JSON objects as hash

@@ -916,17 +916,20 @@ creation when present."
 
 (defun format-context (context-usage)
   "One line reporting the CLI's own /context read on the session's
-context-window fill, e.g. \"Context: 1.4% used (985882 tokens left | 14118
-tokens used / 1000000 available tokens)\". Fed by FETCH-CONTEXT-USAGE rather
-than derived from per-call token counts, since the model-facing events never
-say how big the window actually is -- guessing that window size is exactly
-the mistake this replaces."
+context-window fill, e.g. \"Context: 1.4% used (14.1K / 1M tokens | 985.9K
+tokens left)\". Fed by FETCH-CONTEXT-USAGE rather than derived from per-call
+token counts, since the model-facing events never say how big the window
+actually is -- guessing that window size is exactly the mistake this
+replaces."
   (when context-usage
     (let ((percentage (gethash "percentage" context-usage))
           (total (gethash "total_tokens" context-usage))
           (window (gethash "raw_max_tokens" context-usage)))
       (format nil "Context: ~,1f% used (~a / ~a tokens | ~a tokens left)"
-              percentage total window (max 0 (- window total))))))
+              percentage
+              (format-count total)
+              (format-count window)
+              (format-count (max 0 (- window total)))))))
 
 (defun format-usage (cost rate-limit usage context-usage)
   (let ((tokens (format-tokens usage))
