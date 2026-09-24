@@ -43,9 +43,48 @@
 (defparameter *model* "sonnet")
 (defparameter *permission-mode* "bypassPermissions")
 
-;;; The CLI rides subscription auth and has no models endpoint to ask, so the
-;;; aliases --model accepts are hard-coded.
-(defparameter *models* (vector "sonnet" "opus" "fable" "haiku"))
+;;; The CLI itself has no models endpoint to ask, but once it has run at least
+;;; once under this $HOME it caches the catalog its own model picker reads
+;;; from. DISCOVER-MODELS reads that cache once at load time so *MODELS*
+;;; reflects whatever this account currently has access to; FALLBACK-MODELS
+;;; is the last catalog snapshot known at the time this file was written, used
+;;; when the cache is missing or unreadable (e.g. the CLI has never run under
+;;; this $HOME yet).
+(defparameter *fallback-models* (vector "sonnet" "opus" "fable" "haiku" "mythos"))
+
+(defun claude-config-dir ()
+  (let ((override (sb-ext:posix-getenv "CLAUDE_CONFIG_DIR")))
+    (if (and override (plusp (length override)))
+        (pathname (format nil "~a/" (string-right-trim "/" override)))
+        (merge-pathnames ".claude/" (user-homedir-pathname)))))
+
+(defun model-catalog-cache-files ()
+  (directory (merge-pathnames "cache/model-catalog/*.json" (claude-config-dir))))
+
+(defun cli-model-catalog ()
+  "The newest cache/model-catalog entry for the CLI's own (\"cc\") surface,
+already parsed by shasht, or NIL if none exists or none parses."
+  (let ((catalogs (loop for file in (model-catalog-cache-files)
+                         for parsed = (ignore-errors (with-open-file (in file) (shasht:read-json in)))
+                         for catalog = (and parsed (gethash "catalog" parsed))
+                         when (and catalog (equal (gethash "surface" catalog) "cc"))
+                           collect parsed)))
+    (first (sort catalogs #'> :key (lambda (parsed) (or (gethash "fetchedAt" parsed) 0))))))
+
+(defun model-aliases (catalog)
+  (let ((models (gethash "models" (gethash "config" (gethash "catalog" catalog)))))
+    (remove-duplicates
+     (loop for model across models
+           for short-name = (gethash "short_name" model)
+           when short-name collect (string-downcase short-name))
+     :test #'string= :from-end t)))
+
+(defun discover-models ()
+  (let* ((catalog (ignore-errors (cli-model-catalog)))
+         (aliases (and catalog (model-aliases catalog))))
+    (if aliases (coerce aliases 'vector) *fallback-models*)))
+
+(defparameter *models* (discover-models))
 
 (defparameter *effort* nil)
 (defparameter *efforts* (vector "low" "medium" "high" "xhigh" "max"))
