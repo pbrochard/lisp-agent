@@ -32,7 +32,7 @@
 (defpackage :agent-claudecode
   (:use :cl :utils :common :cl-ansi-text)
   (:export #:run #:use #:forget #:set-model #:list-models #:lm #:*models*
-           #:set-effort #:list-efforts #:le #:*efforts* #:usage
+           #:effort #:usage
            #:set-timezone #:*timezone*
            #:verbose #:set-verbose #:*verbose*)
   (:nicknames :cc :claudecode :ccode))
@@ -982,15 +982,19 @@ carries no rate-limit payload of its own, hence *LAST-RATE-LIMIT*."
 (defun list-efforts ()
   (loop for name across *efforts*
         for index from 1
-        do (format t "~&[~a] ~a~%" index name)))
-
-(defun le () (list-efforts))
+        do (format t "~&[~a] ~a~a~%" index name
+				   (if (equal name *effort*) " <--" ""))))
 
 (defun set-effort (num)
-  (list-efforts)
   (setf *effort* (aref *efforts* (- num 1)))
   (use)
   *effort*)
+
+(defun effort (&optional num)
+  (when num
+	(set-effort num))
+  (list-efforts)
+  (or *effort* "default"))
 
 (defun set-timezone (name)
   "Set the timezone usage reset times are shown in, e.g.

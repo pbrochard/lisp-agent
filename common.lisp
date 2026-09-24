@@ -188,9 +188,7 @@ silently dropped."
 interface, not an agent's own, and so is left out of its extras.")
 
 (defparameter *agent-command-blurbs*
-  '(("LE"            . "list this agent's effort levels, numbered")
-    ("LIST-EFFORTS"  . "as LE, but in full")
-    ("SET-EFFORT"    . "switch to effort number N: (set-effort 3)")
+  '(("EFFORT"        . "list or switch to effort number N: (effort 3)")
     ("SET-TIMEZONE"  . "zone usage reset times show in: (set-timezone \"Asia/Tokyo\")")
     ("VERBOSE"       . "toggle the live tool trace")
     ("SET-VERBOSE"   . "turn the live tool trace on or off")
