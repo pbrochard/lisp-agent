@@ -967,7 +967,8 @@ rate-limit payload of its own, hence *LAST-RATE-LIMIT*."
         (let ((windows (format-windows *last-rate-limit*)))
           (when (plusp (length windows))
             (format t "~&~a" (grey-multiline windows))))
-        (when context (format t "~&~a~%" (grey context)))))))
+        (when context (format t "~&~a~%" (grey context)))
+		(format t "~&~a ~a:~a~%" SEP (grey (recorded-agent-name)) (grey *model*))))))
 
 (defun run (prompt)
   (use)
