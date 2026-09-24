@@ -821,7 +821,8 @@ what break a reply into deltas we can render as they arrive."
 (defun call-claude (prompt on-event)
   "Run the claude CLI on PROMPT, calling ON-EVENT with each parsed JSON event
 as it arrives, so the caller can render the turn while it is still working.
-Returns (values answer-text session-id total-cost-usd rate-limit-info usage)."
+Returns (values answer-text session-id total-cost-usd rate-limit-info usage
+context-usage)."
   (let* ((session-id (read-session-id))
          (args (claude-cli-args prompt session-id))
          (process (sb-ext:run-program *claude-bin* args
@@ -829,7 +830,8 @@ Returns (values answer-text session-id total-cost-usd rate-limit-info usage)."
                                        :external-format '(:utf-8 :replacement #\?)
                                        :wait nil :search t))
          (result nil)
-         (rate-limit nil))
+         (rate-limit nil)
+         (context-usage nil))
     (sb-thread:make-thread (lambda () (drain-stderr process)) :name "claude-stderr")
     (loop for line = (read-line (sb-ext:process-output process) nil nil)
           while line
@@ -841,13 +843,18 @@ Returns (values answer-text session-id total-cost-usd rate-limit-info usage)."
                    (cond
                      ((equal type "rate_limit_event")
                       (setf rate-limit (gethash "rate_limit_info" event)))
-                     ((equal type "result") (setf result event))))))
+                     ((equal type "result") (setf result event)))
+                   ;; Only a "/context" reply carries this, straight from the
+                   ;; CLI's own accounting -- the model-facing events never do.
+                   (let ((cu (gethash "context_usage" event)))
+                     (when cu (setf context-usage cu))))))
     (sb-ext:process-wait process)
     (values (gethash "result" result)
             (gethash "session_id" result)
             (gethash "total_cost_usd" result)
             rate-limit
-            (gethash "usage" result))))
+            (gethash "usage" result)
+            context-usage)))
 
 ;;; --- usage reporting ---------------------------------------------------
 ;;; Printed just above the separator: where the account stands on the rolling
@@ -907,29 +914,22 @@ creation when present."
               (and cache-read (plusp cache-read) cache-read)
               (and cache-creation (plusp cache-creation) cache-creation)))))
 
-(defparameter +context-window-size+ 200000
-  "Token budget the CLI itself assumes for its own /context report, absent the
-1M-token beta window.")
-
-(defun context-tokens-used (usage)
-  "Prompt tokens the last turn actually spent against the context window: the
-fresh input plus both cache buckets, mirroring how the CLI computes it."
-  (+ (or (gethash "input_tokens" usage) 0)
-     (or (gethash "cache_read_input_tokens" usage) 0)
-     (or (gethash "cache_creation_input_tokens" usage) 0)))
-
-(defun format-context (usage)
-  "One line reporting how much of the context window the last turn's prompt
-filled, e.g. \"Context: 12.3% used (175000 tokens left)\"."
-  (when usage
-    (let* ((used (context-tokens-used usage))
-           (percentage (* 100 (/ used (float +context-window-size+)))))
+(defun format-context (context-usage)
+  "One line reporting the CLI's own /context read on the session's
+context-window fill, e.g. \"Context: 1.4% used (985882 tokens left)\". Fed by
+FETCH-CONTEXT-USAGE rather than derived from per-call token counts, since the
+model-facing events never say how big the window actually is -- guessing that
+window size is exactly the mistake this replaces."
+  (when context-usage
+    (let ((percentage (gethash "percentage" context-usage))
+          (total (gethash "total_tokens" context-usage))
+          (window (gethash "raw_max_tokens" context-usage)))
       (format nil "Context: ~,1f% used (~a tokens left)"
-              percentage (max 0 (- +context-window-size+ used))))))
+              percentage (max 0 (- window total))))))
 
-(defun format-usage (cost rate-limit usage)
+(defun format-usage (cost rate-limit usage context-usage)
   (let ((tokens (format-tokens usage))
-        (context (format-context usage)))
+        (context (format-context context-usage)))
     (with-output-to-string (s)
       (write-string (format-windows rate-limit) s)
       (when tokens (format s "~a~%" tokens))
@@ -954,6 +954,12 @@ carries no rate-limit payload of its own, hence *LAST-RATE-LIMIT*."
         (when (plusp (length windows))
           (format t "~&~a" (grey windows)))))))
 
+(defun fetch-context-usage ()
+  "The CLI's own /context read on the just-resumed session's context-window
+fill. Like /usage, /context is answered locally rather than by the model, so
+this costs nothing and does not touch the conversation history."
+  (nth-value 5 (call-claude "/context" (lambda (event) (declare (ignore event))))))
+
 (defun run (prompt)
   (use)
   (set-status STATUS-THINKING)
@@ -967,11 +973,12 @@ carries no rate-limit payload of its own, hence *LAST-RATE-LIMIT*."
       (remember (append (recall)
                         (list (obj "role" "user" "content" prompt)
                               (obj "role" "assistant" "content" (strip-terminal-control-chars text)))))
-      (sb-thread:with-mutex (*output-lock*)
-        (format t "~&~%~a~%~a ~a:~a~%"
-                (grey (format-usage cost rate-limit usage))
-                SEP (grey (recorded-agent-name))
-                (grey *model*)))
+      (let ((context-usage (fetch-context-usage)))
+        (sb-thread:with-mutex (*output-lock*)
+          (format t "~&~%~a~%~a ~a:~a~%"
+                  (grey (format-usage cost rate-limit usage context-usage))
+                  SEP (grey (recorded-agent-name))
+                  (grey *model*))))
       (set-status STATUS-OK))))
 
 (defun use ()
