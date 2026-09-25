@@ -20,7 +20,7 @@
 
 (in-package :agent-ollama)
 
-(defparameter *endpoint* "http://localhost:11434/api/chat")
+(defparameter *endpoint* "http://172.17.0.1:11434/api/chat")
 ;;(defparameter *model* "qwen3:8b")
 ;;(defparameter *model* "deepseek-r1:latest")
 (defparameter *model* "qwen3")
