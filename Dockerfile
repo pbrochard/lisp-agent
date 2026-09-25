@@ -19,6 +19,7 @@ FROM debian:trixie-slim
 RUN apt-get update \
 	&& apt-get install -y --no-install-recommends sbcl ca-certificates curl rlwrap build-essential git jq vim \
 	lynx nodejs node-corepack node-gyp poppler-utils faketime openjdk-21-jdk-headless \
+	fd-find fzf wget shellcheck \
 	&& rm -rf /var/lib/apt/lists/*
 
 RUN corepack enable
@@ -60,6 +61,9 @@ USER user
 # Keep memory.json inside a mountable directory so it survives the container.
 ENV AGENT_MEMORY=/agent/data/memory.json
 RUN mkdir -p /agent/data
+
+# Install fd link
+RUN mkdir -p ~/.local/bin/; ln -s $(which fdfind) ~/.local/bin/fd
 
 # Load the agent and drop you at a live REPL. This is the "login".
 #ENTRYPOINT ["sbcl", "--load", "agent.lisp"]
