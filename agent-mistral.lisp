@@ -15,7 +15,7 @@
 
 (defpackage :agent-mistral
   (:use :cl :utils :http-utils :openai-utils :common)
-  (:export #:run #:use #:forget #:list-models #:*models* #:lm #:llm #:set-model #:usage)
+  (:export #:run #:use #:forget #:model #:*models* #:llm #:usage)
   (:nicknames :mi :mistral))
 
 (in-package :agent-mistral)
@@ -106,9 +106,15 @@ what a turn cost. NIL until a call is made.")
                      (http-get-json (proxy-url "mistral/v1/models")
                                     :headers '(("content-type" . "application/json")))))))
 
-(defun lm ()
+(defun model (&optional num)
+  "List this agent's models, numbered, marking the one in use, or --
+with NUM -- switch to model number NUM. One entry point, like EFFORT."
   (list-models)
-  (print-model-ids *models*))
+  (when num
+    (setf *model* (model-id *models* num))
+    (use))
+  (print-model-ids *models* :current *model*)
+  *model*)
 
 (defun llm ()
   (list-models)
@@ -121,11 +127,6 @@ what a turn cost. NIL until a call is made.")
 							  k v))
 					p)
 		   (format t "~&__________~%")))
-
-(defun set-model (num)
-  (list-models)
-  (setf *model* (model-id *models* num))
-  (use))
 
 (defun usage (&optional date)
   "Report this account's usage. The last model call's token counts come

@@ -31,7 +31,7 @@
 
 (defpackage :agent-claudecode
   (:use :cl :utils :common :cl-ansi-text)
-  (:export #:run #:use #:forget #:set-model #:list-models #:lm #:*models*
+  (:export #:run #:use #:forget #:model #:*models*
            #:effort #:usage
            #:set-timezone #:*timezone*
            #:verbose #:set-verbose #:*verbose*)
@@ -1058,14 +1058,19 @@ rate-limit payload of its own, hence *LAST-RATE-LIMIT*."
 (defun list-models ()
   (loop for name across *models*
         for index from 1
-        do (format t "~&[~a] ~a~%" index name)))
-
-(defun lm () (list-models))
+        do (format t "~&[~a] ~a~a~%" index name
+				   (if (equal name *model*) " <--" ""))))
 
 (defun set-model (num)
-  (list-models)
   (setf *model* (aref *models* (- num 1)))
-  (use))
+  (use)
+  *model*)
+
+(defun model (&optional num)
+  (when num
+	(set-model num))
+  (list-models)
+  (or *model* "default"))
 
 (defun list-efforts ()
   (loop for name across *efforts*

@@ -122,9 +122,8 @@ says which agent it came up on. Returns the package now current."
      ("np"   . "edit a fresh prompt, then run it")
      ("r"    . "alias of np"))
     ("Models"
-     ("lm"        . "list this agent's models, numbered")
-     ("llm"       . "list this agent's models with full details")
-     ("set-model" . "switch to model number N: (set-model 3)"))
+     ("model" . "list this agent's models, numbered, or switch to model N: (model 3)")
+     ("llm"   . "list this agent's models with full details"))
     ("Session"
      ("run"    . "send a prompt straight to the current agent: (run \"...\")")
      ("use"    . "make this agent the current one and report its model")
@@ -182,8 +181,7 @@ silently dropped."
 ;;; updating when an agent gains a command.
 
 (defparameter *shared-exports*
-  '("RUN" "USE" "FORGET" "LM" "LLM" "SET-MODEL" "LIST-MODELS"
-     "USAGE")
+  '("RUN" "USE" "FORGET" "MODEL" "LLM" "USAGE")
   "The verbs every agent exports; a command in this list is common
 interface, not an agent's own, and so is left out of its extras.")
 
@@ -232,8 +230,7 @@ none: most agents are exactly the shared interface."
 
 (defun help ()
   "List the shared commands, then the agents available with the aliases
-that select each one and any commands an agent adds of its own. Type a
-command at the REPL -- e.g. (r), (lm), (set-model 3) -- or an agent
+command at the REPL -- e.g. (r), (model 3) -- or an agent
 alias -- e.g. (cc), (claude), (g)."
   (print-commands)
   (format t "~&~%~a~%Agents (call an alias to switch):~%" SEP)
@@ -365,16 +362,23 @@ SET-STATUS."
 
 
 ;;; --- model pickers -----------------------------------------------------
-;;; The list/lm/set-model trio is per-provider only in how a model entry
-;;; exposes its id: OpenAI-style agents use the "id" field, Gemini uses
-;;; "name" (with a "models/" prefix to strip).  These two helpers take
-;;; that accessor as arguments; each agent keeps its own LIST-MODELS.
+;;; Each agent exposes ONE entry point, MODEL: with no argument it lists
+;;; the models, numbered, marking the current one; with a number it
+;;; switches to that model. That mirrors the single EFFORT entry point.
+;;; Providers differ only in how a model entry exposes its id: OpenAI-
+;;; style agents use the "id" field, Gemini uses "name" (with a
+;;; "models/" prefix to strip). The helpers below take that accessor as
+;;; arguments; each agent keeps its own fetch-and-list logic.
 
-(defun print-model-ids (models &key (id-key "id") (id-fn #'identity))
-  "Print \"[n] id\" for each model in MODELS (a vector of JSON objects)."
+(defun print-model-ids (models &key (id-key "id") (id-fn #'identity) current)
+  "Print \"[n] id\" for each model in MODELS (a vector of JSON
+objects), appending a marker after the one equal to CURRENT -- the
+model in use -- so it is obvious which is selected."
   (loop for m across models
         for index from 1
-        do (format t "~&[~a] ~a~%" index (funcall id-fn (gethash id-key m)))))
+        for id = (funcall id-fn (gethash id-key m))
+        do (format t "~&[~a] ~a~a~%" index id
+                   (if (equal id current) " <--" ""))))
 
 (defun model-id (models num &key (id-key "id") (id-fn #'identity))
   "Return the id of the NUM-th (1-based) model in MODELS."

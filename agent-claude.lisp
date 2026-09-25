@@ -15,7 +15,7 @@
 
 (defpackage :agent-claude
   (:use :cl :utils :http-utils :common)
-  (:export #:run #:use #:forget #:list-models #:*models* #:lm #:llm #:set-model #:usage)
+  (:export #:run #:use #:forget #:model #:*models* #:llm #:usage)
   (:nicknames :cd :claude))
 
 (in-package :agent-claude)
@@ -178,9 +178,15 @@ balance to add the way the OpenAI-compatible agents do. DATE is accepted so
                                     :headers `(("content-type" . "application/json")
                                                ("anthropic-version" . ,*api-version*)))))))
 
-(defun lm ()
+(defun model (&optional num)
+  "List this agent's models, numbered, marking the one in use, or --
+with NUM -- switch to model number NUM. One entry point, like EFFORT."
   (list-models)
-  (print-model-ids *models*))
+  (when num
+    (setf *model* (model-id *models* num))
+    (use))
+  (print-model-ids *models* :current *model*)
+  *model*)
 
 (defun llm ()
   (list-models)
@@ -196,8 +202,3 @@ balance to add the way the OpenAI-compatible agents do. DATE is accepted so
 								  v)))
 					p)
 		   (format t "~&__________~%")))
-
-(defun set-model (num)
-  (list-models)
-  (setf *model* (model-id *models* num))
-  (use))

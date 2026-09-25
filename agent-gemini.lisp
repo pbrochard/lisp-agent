@@ -15,7 +15,7 @@
 
 (defpackage :agent-gemini
   (:use :cl :utils :http-utils :common)
-  (:export #:run #:use #:forget #:list-models :*models* #:lm #:llm #:set-model #:usage)
+  (:export #:run #:use #:forget #:model #:*models* #:llm #:usage)
   (:nicknames :g :gm :gem :gemini))
 
 (in-package :agent-gemini)
@@ -170,10 +170,18 @@ agents and ignored."
                       (proxy-url "gemini/v1beta/models")
                       :headers '(("content-type" . "application/json")))))))
 
-(defun lm ()
+(defun model (&optional num)
+  "List this agent's models, numbered, marking the one in use, or --
+with NUM -- switch to model number NUM. One entry point, like EFFORT."
   (list-models)
+  (when num
+    (setf *model* (model-id *models* num :id-key "name"
+                            :id-fn (lambda (s) (remove-prefix s "models/"))))
+    (use))
   (print-model-ids *models* :id-key "name"
-                         :id-fn (lambda (s) (remove-prefix s "models/"))))
+                         :id-fn (lambda (s) (remove-prefix s "models/"))
+                         :current *model*)
+  *model*)
 
 (defun llm ()
   (list-models)
@@ -187,10 +195,4 @@ agents and ignored."
 							  k v))
 					p)
 		   (format t "~&__________~%")))
-
-(defun set-model (num)
-  (list-models)
-  (setf *model* (model-id *models* num :id-key "name"
-                          :id-fn (lambda (s) (remove-prefix s "models/"))))
-  (use))
 
