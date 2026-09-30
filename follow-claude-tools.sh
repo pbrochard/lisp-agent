@@ -11,7 +11,7 @@ cls() {
 }
 
 cls
-echo "Following logs in $(pwd)/claudecode-tools.md"
+echo "Following logs in $(pwd)/data/claudecode-tools.md"
 echo "____"
 
-tail -F -n 0 claudecode-tools.md | batcat --paging=never --language=md --unbuffered --plain
+tail -F -n 0 $(pwd)/data/claudecode-tools.md | batcat --paging=never --language=md --unbuffered --plain
