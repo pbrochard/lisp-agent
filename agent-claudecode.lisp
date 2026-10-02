@@ -619,14 +619,10 @@ some other kind. Many thinking deltas arrive genuinely empty."
             (and (vectorp tools) (length tools)))))
 
 ;;; --- stream printer -------------------------------------------------------
-;;; The state the printer threads between events, and the primitives that
-;;; read and write it: SGR repair, whole-line buffering, blank-line
-;;; spacing. Kept out of MAKE-STREAM-PRINTER so the printer body reads as
+;;; The state MAKE-STREAM-PRINTER threads between events (SP-STATE), and the
+;;; primitives that read and write it: SGR repair, whole-line buffering, and
+;;; blank-line spacing. Kept out of MAKE-STREAM-PRINTER so its body reads as
 ;;; behaviour rather than buffer bookkeeping.
-
-;;; --- stream-printer state ------------------------------------------------
-;;; Everything the printer carries between events, in one place, so the
-;;; printer body reads as behaviour rather than state threading.
 
 (defstruct (sp-state (:constructor make-sp-state) (:conc-name sp-))
   (trailing-newlines 2)          ; 0 = mid-line, 1 = one newline, 2 = blank line ready
