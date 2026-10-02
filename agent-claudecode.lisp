@@ -618,237 +618,235 @@ some other kind. Many thinking deltas arrive genuinely empty."
             (gethash "cwd" event)
             (and (vectorp tools) (length tools)))))
 
+;;; --- stream printer -------------------------------------------------------
+;;; The state the printer threads between events, and the primitives that
+;;; read and write it: SGR repair, whole-line buffering, blank-line
+;;; spacing. Kept out of MAKE-STREAM-PRINTER so the printer body reads as
+;;; behaviour rather than buffer bookkeeping.
+
+;;; --- stream-printer state ------------------------------------------------
+;;; Everything the printer carries between events, in one place, so the
+;;; printer body reads as behaviour rather than state threading.
+
+(defstruct (sp-state (:constructor make-sp-state) (:conc-name sp-))
+  (trailing-newlines 2)          ; 0 = mid-line, 1 = one newline, 2 = blank line ready
+  (pending-bracket "")            ; an SGR sequence that could still complete
+  (pending-line "")               ; a line held back until its newline arrives
+  (pending-line-grey nil)
+  (subagent-names (make-hash-table :test #'equal))
+  (tool-names (make-hash-table :test #'equal))
+  (tool-descriptions (make-hash-table :test #'equal))
+  (last-trace-p nil)
+  (streamed-p nil))
+
+(defun sp-track (state str)
+  (loop for ch across str
+        do (setf (sp-trailing-newlines state)
+                 (if (char= ch #\Newline)
+                     (min 2 (1+ (sp-trailing-newlines state)))
+                     0))))
+
+(defun sp-write (state rendered plain)
+  (write-string rendered)
+  (sp-track state plain))
+
+(defun sp-ensure-blank-line (state)
+  (loop while (< (sp-trailing-newlines state) 2)
+        do (write-char #\Newline)
+           (incf (sp-trailing-newlines state))))
+
+(defun sp-ensure-line-start (state)
+  (when (zerop (sp-trailing-newlines state))
+    (write-char #\Newline)
+    (incf (sp-trailing-newlines state))))
+
+(defun sp-restore-sgr (state str)
+  "Put back the ESC the CLI strips from colour sequences, holding a trailing
+sequence that could still complete across the next chunk."
+  (let* ((full (concatenate 'string (sp-pending-bracket state) str))
+         (len (length full)))
+    (setf (sp-pending-bracket state) "")
+    (with-output-to-string (out)
+      (loop with i = 0
+            while (< i len)
+            do (let ((end (and (char= (char full i) #\[) (sgr-parameters-end full i))))
+                 (cond
+                   ((eq end :incomplete) (setf (sp-pending-bracket state) (subseq full i)) (setf i len))
+                   ((integerp end)
+                    (unless (and (plusp i) (char= (char full (1- i)) #\Escape)) (write-char #\Escape out))
+                    (write-string full out :start i :end end)
+                    (setf i end))
+                   (t (write-char (char full i) out) (incf i))))))))
+
+(defun sp-print-grey-line (state line)
+  "LINE greyed and terminated, written as one string: a line put out in
+pieces is a line rlwrap redraws between them."
+  (let ((break (string #\Newline)))
+    (sp-write state (concatenate 'string (grey-multiline line) break) (concatenate 'string line break))))
+
+(defun sp-render-streamed (str grey)
+  (if grey (grey-multiline str) str))
+
+(defun sp-flush-pending-line (state)
+  (unless (zerop (length (sp-pending-line state)))
+    (let ((line (concatenate 'string (sp-pending-line state) (string #\Newline))))
+      (sp-write state (sp-render-streamed line (sp-pending-line-grey state)) line))
+    (setf (sp-pending-line state) "")))
+
+(defun sp-write-whole-lines (state str grey)
+  "Write STR up to its last newline and hold the rest back until the newline
+ending it arrives. rlwrap takes any unfinished line for a prompt and redraws
+it on every write; a line written whole is never redrawn."
+  (unless (eq grey (sp-pending-line-grey state)) (sp-flush-pending-line state))
+  (setf (sp-pending-line-grey state) grey)
+  (let* ((buffered (concatenate 'string (sp-pending-line state) str))
+         (line-end (position #\Newline buffered :from-end t)))
+    (when line-end
+      (let ((whole-lines (subseq buffered 0 (1+ line-end))))
+        (sp-write state (sp-render-streamed whole-lines grey) whole-lines)))
+    (setf (sp-pending-line state) (if line-end (subseq buffered (1+ line-end)) buffered))))
+
+(defun sp-flush-text (state)
+  "Put out what the text stream still holds back: an SGR sequence that can no
+longer complete, then the unfinished line."
+  (setf (sp-pending-line state)
+        (concatenate 'string (sp-pending-line state) (sp-pending-bracket state))
+        (sp-pending-bracket state) "")
+  (sp-flush-pending-line state))
+
+(defun sp-remember-call (state block)
+  (setf (gethash (gethash "id" block) (sp-tool-names state)) (gethash "name" block)
+        (gethash (gethash "id" block) (sp-tool-descriptions state)) (tool-description block)))
+
 (defun make-stream-printer ()
   "Return (values ON-EVENT FLUSH-REMAINING-OUTPUT) for CALL-CLAUDE. ON-EVENT
 renders a stream_event live: grey for thinking, plain for the reply text, and
 -- with *VERBOSE* on -- a grey line per tool call and per tool result. Exactly
-one blank line separates each transition into a text block, tracked by
-counting the trailing newlines already written rather than inserting one
-blindly, which double-spaced whenever the model's own text already supplied
-the gap. FLUSH-REMAINING-OUTPUT is for the caller to run once CALL-CLAUDE
-returns, since ON-EVENT buffers an in-progress line until its closing newline
-arrives and would otherwise lose it if the CLI's stream ends without one."
-  (let ((trailing-newlines 2) ; RUN's own preamble already ends on a blank line
-        (pending-bracket "")
-        (pending-line "")
-        (pending-line-grey nil)
-        (subagent-names (make-hash-table :test #'equal))
-        (tool-names (make-hash-table :test #'equal))
-        (tool-descriptions (make-hash-table :test #'equal))
-        (last-line-was-trace nil)
-        (streamed-text nil))
-    (labels ((track! (str)
-               (loop for ch across str
-                     do (setf trailing-newlines (if (char= ch #\Newline) (min 2 (1+ trailing-newlines)) 0))))
-             (ensure-blank-line ()
-               (loop while (< trailing-newlines 2)
-                     do (write-char #\Newline)
-                        (incf trailing-newlines)))
-             (ensure-line-start ()
-               (when (zerop trailing-newlines)
-                 (write-char #\Newline)
-                 (incf trailing-newlines)))
-             (restore-sgr-escapes (str)
-               "The CLI's text deltas arrive with the ESC of a colour
-sequence already eaten, and a bare sequence can itself be split across
-chunks (\"[3\" then \"3m\"). Put the ESC back, holding a trailing sequence
-that could still complete in PENDING-BRACKET for the next chunk."
-               (let* ((full (concatenate 'string pending-bracket str))
-                      (len (length full)))
-                 (setf pending-bracket "")
-                 (with-output-to-string (out)
-                   (loop with i = 0
-                         while (< i len)
-                         do (let ((end (and (char= (char full i) #\[)
-                                            (sgr-parameters-end full i))))
-                              (cond
-                                ((eq end :incomplete)
-                                 (setf pending-bracket (subseq full i))
-                                 (setf i len))
-                                ((integerp end)
-                                 (unless (and (plusp i) (char= (char full (1- i)) #\Escape))
-                                   (write-char #\Escape out))
-                                 (write-string full out :start i :end end)
-                                 (setf i end))
-                                (t
-                                 (write-char (char full i) out)
-                                 (incf i))))))))
-             (flush-pending-bracket! ()
-               "A held-back sequence never completes if the block ends right
-there -- hand it to the line it was cut out of rather than losing it."
-               (setf pending-line (concatenate 'string pending-line pending-bracket)
-                     pending-bracket ""))
-             (write-tracked! (rendered plain)
-               (write-string rendered)
-               (track! plain))
-             (print-grey-line! (line)
-               "LINE greyed and terminated, written as one string: a line put
-out in pieces is a line rlwrap redraws between them."
-               (let ((break (string #\Newline)))
-                 (write-tracked! (concatenate 'string (grey-multiline line) break)
-                                 (concatenate 'string line break))))
-             (render-streamed (str grey)
-               (if grey (grey-multiline str) str))
-             (write-whole-lines! (str grey)
-               "Write STR up to its last newline and hold the rest back until
-the newline ending it arrives. rlwrap takes any unfinished line for a prompt
-and redraws it on every write, climbing rows with cursor-up to do so; where
-its column arithmetic and the terminal's disagree -- a double-width glyph, a
-line ending exactly at the last column, a scroll landing mid-redraw -- the
-redraw resumes on the wrong row and the lines mash into each other. A line
-written whole is never redrawn."
-               (unless (eq grey pending-line-grey) (flush-pending-line!))
-               (setf pending-line-grey grey)
-               (let* ((buffered (concatenate 'string pending-line str))
-                      (line-end (position #\Newline buffered :from-end t)))
-                 (when line-end
-                   (let ((whole-lines (subseq buffered 0 (1+ line-end))))
-                     (write-tracked! (render-streamed whole-lines grey) whole-lines)))
-                 (setf pending-line (if line-end (subseq buffered (1+ line-end)) buffered))))
-             (flush-pending-line! ()
-               "Terminate the held-back line as it goes out: left unfinished,
-rlwrap would redraw it as a prompt (see WRITE-WHOLE-LINES!)."
-               (unless (zerop (length pending-line))
-                 (let ((line (concatenate 'string pending-line (string #\Newline))))
-                   (write-tracked! (render-streamed line pending-line-grey) line))
-                 (setf pending-line "")))
-             (flush-streamed-text! ()
-               "Put out what the text stream still holds back, for output that
-must not be overtaken by it: an SGR sequence that can no longer complete,
-then the unfinished line."
-               (flush-pending-bracket!)
-               (flush-pending-line!))
-             (print-subagent-block (content-key subagent-name block)
-               "A forwarded subagent block arrives whole rather than as
-deltas, so it is printed as one unit, tagged with the subagent it came
-from. The grey span stops before the newline, per GREY-MULTILINE."
-               (let ((clean (strip-terminal-control-chars (gethash content-key block))))
-                 (unless (zerop (length clean))
-                   (flush-streamed-text!)
-                   (ensure-blank-line)
-                   (print-grey-line! (format nil "  ⤷ [~a] ~a" subagent-name clean))
-                   (setf last-line-was-trace nil)
+one blank line separates each transition into a text block. FLUSH-REMAINING-OUTPUT
+runs once CALL-CLAUDE returns, to release a final unterminated line the CLI's
+stream ended without closing."
+  (let ((state (make-sp-state)))
+    (labels ((out (rendered plain)
+               (sp-write state rendered plain))
+             (blank-line ()
+               (sp-ensure-blank-line state))
+             (flush-text! ()
+               (sp-flush-text state))
+             (delta (d)
+               (let* ((raw (delta-text d))
+                      (clean
+                       (and raw
+                            (strip-terminal-control-chars
+                             (if (thinking-delta-p d)
+                                 raw
+                                 (sp-restore-sgr state raw))))))
+                 (when (and clean (plusp (length clean)))
+                   (unless (thinking-delta-p d) (setf (sp-streamed-p state) t))
+                   (sp-write-whole-lines state clean (thinking-delta-p d))
+                   (setf (sp-last-trace-p state) nil)
                    (finish-output))))
-             (print-trace-line (line)
-               "One grey line of the *VERBOSE* trace. A run of them stays
-single spaced -- the common case, a model firing several tools back to back
--- while the first after other output gets a blank line above it. LINE is
-newline-free (see ONE-LINE), as GREY-MULTILINE's constraint requires."
-               (flush-streamed-text!)
-               (if last-line-was-trace (ensure-line-start) (ensure-blank-line))
-               (print-grey-line! line)
-               (setf last-line-was-trace t)
+             (trace-line (line)
+               (flush-text!)
+               (if (sp-last-trace-p state)
+                   (sp-ensure-line-start state)
+                   (blank-line))
+               (sp-print-grey-line state line)
+               (setf (sp-last-trace-p state) t)
                (finish-output))
-             (remember-call (block)
-               (setf (gethash (gethash "id" block) tool-names) (gethash "name" block)
-                     (gethash (gethash "id" block) tool-descriptions) (tool-description block)))
-             (print-tool-use (subagent-name block)
-               "Record a tool call in the history and, with *VERBOSE* on, echo
-it. The history is written either way: *VERBOSE* governs the terminal, not
-the file."
-               (remember-call block)
-               (record-tool-use subagent-name block)
+             (subagent-block (key name block)
+               (let ((clean (strip-terminal-control-chars (gethash key block))))
+                 (unless (zerop (length clean))
+                   (flush-text!)
+                   (blank-line)
+                   (sp-print-grey-line state
+                    (format nil "  ⤷ [~a] ~a" name clean))
+                   (setf (sp-last-trace-p state) nil)
+                   (finish-output))))
+             (tool-use (name block)
+               (sp-remember-call state block)
+               (record-tool-use name block)
                (when *verbose*
-                 (print-trace-line (format nil "  ⚒ ~@[[~a] ~]~a"
-                                           subagent-name (format-tool-use block)))))
-             (print-tool-result (subagent-name block)
-               "Record what a tool answered, and with *VERBOSE* on echo it,
-under the name of the call it answers -- a tool_result block itself carries
-only the tool_use id."
-               (let ((tool-name (or (gethash (gethash "tool_use_id" block) tool-names) "tool")))
-                 (record-tool-result subagent-name tool-name
-                                     (gethash (gethash "tool_use_id" block) tool-descriptions)
-                                     block)
+                 (trace-line
+                  (format nil "  ⚒ ~@[[~a] ~]~a" name
+                          (format-tool-use block)))))
+             (tool-result (name block)
+               (let ((tool-name
+                      (or
+                       (gethash (gethash "tool_use_id" block)
+                                (sp-tool-names state))
+                       "tool")))
+                 (record-tool-result name tool-name
+                  (gethash (gethash "tool_use_id" block)
+                           (sp-tool-descriptions state))
+                  block)
                  (when *verbose*
-                   (let ((text (one-line (tool-result-text block) *verbose-result-width*)))
-                     (print-trace-line
-                      (format nil "  ⤶ ~@[[~a] ~]~a~:[~; failed~]: ~a"
-                              subagent-name tool-name
+                   (let ((text
+                          (one-line (tool-result-text block)
+                           *verbose-result-width*)))
+                     (trace-line
+                      (format nil "  ⤶ ~@[[~a] ~]~a~:[~; failed~]: ~a" name
+                              tool-name
                               (json-true-p (gethash "is_error" block))
-                              (if (zerop (length text)) "(no output)" text)))))))
-             (remember-subagent-name (block)
-               "Learn a subagent-spawning call's id -> name, so blocks
-forwarded under that id are labelled with the subagent they came from
-rather than a generic \"subagent\"."
+                              (if (zerop (length text))
+                                  "(no output)"
+                                  text)))))))
+             (remember-subagent (block)
                (when (subagent-spawning-tool-p (gethash "name" block))
                  (let* ((input (gethash "input" block))
-                        (name (and (hash-table-p input)
-                                   (or (gethash "description" input)
-                                       (gethash "subagent_type" input)))))
+                        (name
+                         (and (hash-table-p input)
+                              (or (gethash "description" input)
+                                  (gethash "subagent_type" input)))))
                    (when name
-                     (setf (gethash (gethash "id" block) subagent-names) name))))))
-      (labels ((print-delta (delta)
-                 (let* ((raw (delta-text delta))
-                        (clean (and raw
-                                    (strip-terminal-control-chars
-                                     (if (thinking-delta-p delta) raw (restore-sgr-escapes raw))))))
-                   (when (and clean (plusp (length clean)))
-                     (unless (thinking-delta-p delta) (setf streamed-text t))
-                     (write-whole-lines! clean (thinking-delta-p delta))
-                     (setf last-line-was-trace nil)
-                     (finish-output))))
-               (print-stream-event (inner)
-                 (let ((inner-type (gethash "type" inner)))
-                   (cond
-                     ((text-block-start-p inner)
-                      (flush-streamed-text!)
-                      (ensure-blank-line)
-                      (setf last-line-was-trace nil)
-                      (finish-output))
-                     ((equal inner-type "content_block_stop")
-                      (flush-streamed-text!)
-                      (finish-output))
-                     ((equal inner-type "content_block_delta")
-                      (print-delta (gethash "delta" inner))))))
-               (subagent-name-of (event)
-                 (let ((parent (forwarded-subagent-id event)))
-                   (and parent (or (gethash parent subagent-names) "subagent"))))
-               (print-message-block (subagent-name block)
-                 (let ((block-type (gethash "type" block)))
-                   (cond
-                     ;; The top-level agent's own narration already streamed
-                     ;; in as deltas; only a subagent's arrives whole, here.
-                     ((and subagent-name (narration-block-p block-type))
-                      (print-subagent-block block-type subagent-name block))
-                     ;; A top-level text block normally already streamed in as
-                     ;; deltas and is skipped here. But when the CLI answers
-                     ;; whole -- an error or notice, with no partial messages --
-                     ;; nothing streamed and skipping it would print nothing at
-                     ;; all for the turn. Show it, once, as the fallback.
-                     ((and (null subagent-name)
-                           (equal block-type "text")
-                           (not streamed-text))
-                      (setf streamed-text t)
-                      (print-subagent-block "text" "answer" block))
-                     ((equal block-type "tool_use")
-                      (remember-subagent-name block)
-                      (print-tool-use subagent-name block))
-                     ((equal block-type "tool_result")
-                      (print-tool-result subagent-name block)))))
-               (print-message (event)
-                 (let ((subagent-name (subagent-name-of event)))
-                   (loop for block across (message-blocks event)
-                         do (print-message-block subagent-name block)))))
-        (values
-         (lambda (event)
-           (cond
-             ((equal (gethash "type" event) "stream_event")
-              (sb-thread:with-mutex (*output-lock*)
-                (print-stream-event (gethash "event" event))))
-             ((and *verbose* (init-event-p event))
-              (sb-thread:with-mutex (*output-lock*)
-                (print-trace-line (init-trace-line event))))
-             ((message-event-p event)
-              (sb-thread:with-mutex (*output-lock*)
-                (print-message event)))))
-         (lambda ()
-           "Flush whatever the text stream still has buffered. The CLI's
-stream always closes each block itself, but if the process dies mid-turn
-without one, this is what keeps the buffered tail from being lost instead of
-just left on the terminal by CONTENT_BLOCK_STOP."
+                     (setf (gethash (gethash "id" block)
+                                    (sp-subagent-names state))
+                             name)))))
+             (subagent-name-of (event)
+               (let ((parent (forwarded-subagent-id event)))
+                 (and parent
+                      (or (gethash parent (sp-subagent-names state))
+                          "subagent"))))
+             (message-block (name block)
+               (let ((type (gethash "type" block)))
+                 (cond
+                  ((and name (narration-block-p type))
+                   (subagent-block type name block))
+                  ((and (null name) (equal type "text")
+                        (not (sp-streamed-p state)))
+                   (setf (sp-streamed-p state) t)
+                   (subagent-block "text" "answer" block))
+                  ((equal type "tool_use") (remember-subagent block)
+                   (tool-use name block))
+                  ((equal type "tool_result") (tool-result name block)))))
+             (message (event)
+               (let ((name (subagent-name-of event)))
+                 (loop for block across (message-blocks event)
+                       do (message-block name block))))
+             (stream-event (inner)
+               (let ((type (gethash "type" inner)))
+                 (cond
+                  ((text-block-start-p inner) (flush-text!) (blank-line)
+                   (setf (sp-last-trace-p state) nil) (finish-output))
+                  ((equal type "content_block_stop") (flush-text!)
+                   (finish-output))
+                  ((equal type "content_block_delta")
+                   (delta (gethash "delta" inner)))))))
+      (values
+       (lambda (event)
+         (cond
+          ((equal (gethash "type" event) "stream_event")
            (sb-thread:with-mutex (*output-lock*)
-             (flush-streamed-text!)
-             (finish-output))))))))
+             (stream-event (gethash "event" event))))
+          ((and *verbose* (init-event-p event))
+           (sb-thread:with-mutex (*output-lock*)
+             (trace-line (init-trace-line event))))
+          ((message-event-p event)
+           (sb-thread:with-mutex (*output-lock*)
+             (message event)))))
+       (lambda ()
+         (sb-thread:with-mutex (*output-lock*)
+           (flush-text!)
+           (finish-output)))))))
 
 (defun drain-stderr (process)
   "Forward the child's stderr to *error-output*, sanitizing each line, on its
