@@ -635,7 +635,8 @@ arrives and would otherwise lose it if the CLI's stream ends without one."
         (subagent-names (make-hash-table :test #'equal))
         (tool-names (make-hash-table :test #'equal))
         (tool-descriptions (make-hash-table :test #'equal))
-        (last-line-was-trace nil))
+        (last-line-was-trace nil)
+        (streamed-text nil))
     (labels ((track! (str)
                (loop for ch across str
                      do (setf trailing-newlines (if (char= ch #\Newline) (min 2 (1+ trailing-newlines)) 0))))
@@ -782,6 +783,7 @@ rather than a generic \"subagent\"."
                                     (strip-terminal-control-chars
                                      (if (thinking-delta-p delta) raw (restore-sgr-escapes raw))))))
                    (when (and clean (plusp (length clean)))
+                     (unless (thinking-delta-p delta) (setf streamed-text t))
                      (write-whole-lines! clean (thinking-delta-p delta))
                      (setf last-line-was-trace nil)
                      (finish-output))))
@@ -808,6 +810,16 @@ rather than a generic \"subagent\"."
                      ;; in as deltas; only a subagent's arrives whole, here.
                      ((and subagent-name (narration-block-p block-type))
                       (print-subagent-block block-type subagent-name block))
+                     ;; A top-level text block normally already streamed in as
+                     ;; deltas and is skipped here. But when the CLI answers
+                     ;; whole -- an error or notice, with no partial messages --
+                     ;; nothing streamed and skipping it would print nothing at
+                     ;; all for the turn. Show it, once, as the fallback.
+                     ((and (null subagent-name)
+                           (equal block-type "text")
+                           (not streamed-text))
+                      (setf streamed-text t)
+                      (print-subagent-block "text" "answer" block))
                      ((equal block-type "tool_use")
                       (remember-subagent-name block)
                       (print-tool-use subagent-name block))
