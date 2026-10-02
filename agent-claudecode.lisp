@@ -1001,6 +1001,34 @@ replaces."
       (when context (format s "~a~%" context))
       (format s "Cost: $~,4f this session" (or cost 0)))))
 
+;;; --- authentication preflight -------------------------------------------
+;;; The CLI owns the OAuth session; this only reads it back so a dead one
+;;; reports what to do instead of surfacing as a NIL turn. expiresAt is epoch
+;;; milliseconds and the refresh token has its own, later expiry: once even
+;;; that is past, no retry can help -- only a fresh `claude /login` will.
+
+(defun oauth-status ()
+  "Return (values OK-P MESSAGE) for the CLI's stored OAuth session.
+OK-P is NIL only when the access token is dead AND its refresh token has
+expired too. Reads only, and never signals."
+  (let ((path (merge-pathnames ".claude/.credentials.json" (user-homedir-pathname))))
+    (cond
+      ((not (probe-file path))
+       (values nil "no credentials file; run `claude /login`"))
+      (t
+       (handler-case
+           (with-open-file (s path)
+             (let* ((j (shasht:read-json s))
+                    (o (gethash "claudeAiOauth" j))
+                    (access-exp  (or (gethash "expiresAt" o) 0))
+                    (refresh-exp (or (gethash "refreshTokenExpiresAt" o) 0))
+                    (now-ms (* 1000 (- (get-universal-time) +UNIX-EPOCH-UNIVERSAL-TIME+))))
+               (cond
+                 ((> access-exp now-ms) (values t "ok"))
+                 ((> refresh-exp now-ms) (values t "access token stale but refresh token still valid"))
+                 (t (values nil "OAuth session expired and could not be refreshed; run `claude /login`")))))
+         (error (e) (values nil (format nil "could not read credentials: ~a" e))))))))
+
 ;;; --- entry point ------------------------------------------------------------
 
 ;;; Redefined below, once RUN exists for it to point at: this placeholder is
@@ -1033,12 +1061,28 @@ rate-limit payload of its own, hence *LAST-RATE-LIMIT*."
 
 (defun run (prompt)
   (use)
+  (multiple-value-bind (authenticated message) (oauth-status)
+    (unless authenticated
+      (sb-thread:with-mutex (*output-lock*)
+        (format t "~&~a~%~a~%~a~%" SEP (grey (format nil "Authentication: ~a" message)) SEP))
+      (set-status STATUS-OK)
+      (return-from run nil)))
   (set-status STATUS-THINKING)
   (format t "~&______~&~%")
   (multiple-value-bind (on-event flush-remaining-output) (make-stream-printer)
     (multiple-value-bind (text session-id cost rate-limit usage)
         (call-claude prompt on-event)
       (funcall flush-remaining-output)
+      (unless session-id
+        ;; The CLI answered without a session id: it failed before the model
+        ;; ran -- auth, quota, or a crashed CLI. Show what it said rather than
+        ;; committing an empty exchange to memory and printing NIL.
+        (sb-thread:with-mutex (*output-lock*)
+          (format t "~&~a~%~a~%~a~%" SEP
+                  (grey (if (and text (plusp (length text))) text "[no response from the claude CLI]"))
+                  SEP))
+        (set-status STATUS-OK)
+        (return-from run nil))
       (when session-id (write-session-id session-id))
       (when rate-limit (setf *last-rate-limit* rate-limit))
       (remember (append (recall)
