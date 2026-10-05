@@ -47,6 +47,7 @@ docker run -d --name keyproxy \
 	   -e API_KEY_DEEPSEEK=$API_KEY_DEEPSEEK \
 	   -e API_KEY_MISTRAL=$API_KEY_MISTRAL \
 	   -e API_KEY_OPENAI=$API_KEY_OPENAI \
+	   --name keyproxy \
 	   keyproxy:latest > /dev/null
 
 cleanup() { docker rm -f keyproxy > /dev/null 2>&1; }
@@ -79,4 +80,5 @@ docker run -it --rm \
 	   -v "$(pwd)/home:/home/user" \
 	   -v "$(pwd)/data:/agent/data" \
 	   -v "$(pwd)/skills:/agent/skills" \
+	   --name lisp-agent \
 	   lisp-agent
