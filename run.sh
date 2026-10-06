@@ -2,6 +2,12 @@
 
 ENTRYPOINT=$1
 
+mkdir -p data
+DATA_PATH=$(ls -l . | awk '/data( |$)/ {print $9, $10, $11}')
+echo "Running session in: $DATA_PATH"
+
+echo "____"
+
 API_KEY_CLAUDE=$(gpg -d ~/.authinfo.gpg 2> /dev/null | awk '/api.anthropic.com/ {print $6}')
 API_KEY_GEMINI=$(gpg -d ~/.authinfo.gpg 2> /dev/null | awk '/^machine generativelanguage.googleapis.com/ {print $6}')
 API_KEY_OPENROUTER=$(gpg -d ~/.authinfo.gpg 2> /dev/null | awk '/^machine openrouter.ai/ {print $6}')
