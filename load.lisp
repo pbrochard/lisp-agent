@@ -16,3 +16,6 @@
 ;; Come back up on the agent last selected with USE, or claudecode
 (common:use-recorded-agent)
 
+(when (probe-file "~/startup.lisp")
+  (load "~/startup.lisp")
+  (format t "~a" common:SEP))
