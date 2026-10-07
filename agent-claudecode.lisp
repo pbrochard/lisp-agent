@@ -34,7 +34,8 @@
   (:export #:run #:use #:forget #:model #:*models*
            #:effort #:usage
            #:set-timezone #:*timezone*
-           #:verbose #:set-verbose #:*verbose*)
+           #:verbose #:set-verbose #:*verbose*
+		   #:low #:med #:high)
   (:nicknames :cc :claudecode :ccode))
 
 (in-package :agent-claudecode)
@@ -1161,3 +1162,17 @@ so a long turn shows what it is doing instead of going quiet."
 (defun verbose (&optional (on (not *verbose*)))
   "Shorthand for SET-VERBOSE, to type at the REPL."
   (set-verbose on))
+
+(defun set-model-effort (model effort)
+  (cc:model model)
+  (format t "~a" common:SEP)
+  (cc:effort effort))
+
+(defun low ()
+  (set-model-effort 2 1))
+
+(defun med ()
+  (set-model-effort 2 2))
+
+(defun high ()
+  (set-model-effort 1 3))
