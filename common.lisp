@@ -1,6 +1,6 @@
 (defpackage :common
   (:use :cl :utils :cl-ansi-text :uiop)
-  (:export #:SYSTEM-PROMPT #:*CURRENT-RUN-FN* #:*current-model* #:*MEMORY-FILE* #:*SYSTEM-MESSAGE* #:SEP #:RECALL
+  (:export #:SYSTEM-PROMPT #:*CURRENT-RUN-FN* #:*current-model* #:*MEMORY-FILE* #:*SYSTEM-MESSAGE* #:SEP #:PRINT-SEP #:RECALL
 		   #:REMEMBER #:FORGET-MEM #:FORGET-ALL #:BASH #:CD #:SET-STATUS #:STATUS-THINKING #:STATUS-OK #:print-model-ids #:model-id
 		   #:GET-PROMPT #:EP #:RP #:P #:ENP #:NP #:R #:HELP #:REMEMBER-AGENT #:RECALL-AGENT #:USE-RECORDED-AGENT #:RECORDED-AGENT-NAME)
   (:nicknames :c :co))
@@ -22,6 +22,9 @@
 (defmacro defalias (alias original)
   "Make ALIAS share ORIGINAL's function object, so calling ALIAS doesn't add an extra funcall."
   `(setf (fdefinition ',alias) (fdefinition ',original)))
+
+(defun print-sep ()
+  (format t "~&~a~%" SEP))
 
 ;;; --- memory ---------------------------------------------------------------
 ;;; Messages are already a list of hash tables, i.e. already JSON.
