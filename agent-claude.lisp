@@ -63,7 +63,8 @@ what a turn cost. NIL until a call has been made.")
         "cache_control" (obj "type" "ephemeral")
         "system" system-prompt
         "messages" (coerce messages 'vector)
-        "tools" *tools*)))
+        "tools" *tools*)
+   :read-timeout 120000))
 
 ;;; --- the loop itself ----------------------------------------------------
 ;;; An agent is a recursive function over a growing list of messages.

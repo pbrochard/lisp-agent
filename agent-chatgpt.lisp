@@ -51,7 +51,8 @@ what a turn cost. NIL until a call is made.")
         "messages" (coerce (cons (obj "role" "system" "content" system-prompt)
                                  messages)
                            'vector)
-        "tools" *tools*)))
+        "tools" *tools*)
+   :read-timeout 120000))
 
 ;;; --- the loop itself ----------------------------------------------------
 ;;; An agent is a recursive function over a growing list of messages.

@@ -60,7 +60,8 @@ what a turn cost. NIL until a call has been made.")
    '(("content-type" . "application/json"))
    (obj "system_instruction" (obj "parts" (vector (obj "text" system-prompt)))
         "contents" (coerce contents 'vector)
-        "tools" *tools*)))
+        "tools" *tools*)
+   :read-timeout 120000))
 
 ;;; --- the loop itself ----------------------------------------------------
 ;;; An agent is a recursive function over a growing list of messages.
