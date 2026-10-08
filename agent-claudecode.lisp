@@ -35,7 +35,7 @@
            #:effort #:usage
            #:set-timezone #:*timezone*
            #:verbose #:set-verbose #:*verbose*
-		   #:low #:med #:high)
+		   #:xlow #:low #:med #:high)
   (:nicknames :cc :claudecode :ccode))
 
 (in-package :agent-claudecode)
@@ -1167,6 +1167,9 @@ so a long turn shows what it is doing instead of going quiet."
   (cc:model model)
   (format t "~a" common:SEP)
   (cc:effort effort))
+
+(defun xlow ()
+  (set-model-effort 4 2))
 
 (defun low ()
   (set-model-effort 2 1))
