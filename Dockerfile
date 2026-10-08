@@ -27,7 +27,7 @@ RUN corepack enable
 # Claude Code CLI, for agent-claudecode.lisp (subscription auth, no API key).
 RUN corepack npm install -g @anthropic-ai/claude-code
 
-COPY data/debs/* /debs/
+COPY debs/* /debs/
 RUN dpkg -i /debs/*.deb
 
 # Accept build arguments
