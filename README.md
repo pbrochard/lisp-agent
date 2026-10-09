@@ -4,9 +4,22 @@ This fork exists because the single-file version is small enough to read end to 
 
 ## The `hocwp` branch
 
-[`hocwp`](../../tree/hocwp) branch grows this ~100-line demo into a working agent: four interchangeable backends behind one `(run ...)` — OpenRouter, the Anthropic API, Gemini, Ollama and the Claude Code CLI — each with its own memory, plus REPL tooling (prompt editing, live tool traces, usage and cost reporting, skills).
+[`hocwp`](../../tree/hocwp) branch grows this ~100-line demo into a working agent: interchangeable backends behind one `(run ...)` — OpenRouter, the Anthropic API, Gemini, DeepSeek, Ollama, OpenAI, and the Claude Code CLI — each with its own memory, plus REPL tooling (prompt editing, live tool traces, usage and cost reporting, skills).
 Where `main` is the idea stripped to its essentials, `hocwp` is the version used daily, and it trades the demo's restraint for reach: `bypassPermissions`, mounted host sources, real credentials in the environment.
 It is container-only as a result — `./build.sh` then `./run.sh`, never on your host; pair it with [home-docker](https://github.com/pbrochard/home-docker) to give it a disposable `$HOME` of its own.
+
+## Reaching services on the host (e.g. Ollama)
+
+`run.sh` puts the container on its own isolated Docker network (`lisp-agent-net`) with no route to the host, so `127.0.0.1:<port>` inside the container is the container itself, never your machine. `run.sh` also adds `--add-host=host.docker.internal:host-gateway`, and `ollama-bridge.js` (started by `agent-run.sh`, same pattern as `skills/mongo/scripts/mongo-bridge.js`) relays a local port to that address so `agent-ollama.lisp` can keep calling `http://localhost:11434` unchanged.
+
+That only solves reachability from the container's side. The host service itself must also accept connections that arrive over the Docker bridge rather than loopback — a server bound to `127.0.0.1` only answers traffic that arrives via `127.0.0.1`. For Ollama run via systemd, a `systemctl edit ollama` override such as:
+
+```
+[Service]
+Environment="OLLAMA_HOST=172.17.0.1:11434"
+```
+
+makes it reachable (`172.17.0.1` is the default Docker bridge gateway on Linux; confirm yours with `docker network inspect bridge`). `OLLAMA_HOST=0.0.0.0:11434` also works, at the cost of accepting connections from anything else that can reach the host, not just Docker.
 
 # lisp-agent
 
