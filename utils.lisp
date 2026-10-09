@@ -204,7 +204,7 @@ NIL when it has never been timed. What a RUN prints on its closing line."
       (let* ((latest (first samples))
              (wall (seconds (getf latest :wall)))
              (run (seconds (getf latest :run))))
-        (format nil "~a wall, ~a cpu"
+        (format nil "Times: ~a wall, ~a cpu"
                 (format-duration wall) (format-duration run))))))
 
 (defun sample-line (agent-type)
