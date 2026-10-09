@@ -2,7 +2,7 @@
   (:use :cl :utils :cl-ansi-text :uiop)
   (:export #:SYSTEM-PROMPT #:*CURRENT-RUN-FN* #:*current-model* #:*MEMORY-FILE* #:*SYSTEM-MESSAGE* #:SEP #:PRINT-SEP #:RECALL
 		   #:REMEMBER #:FORGET-MEM #:FORGET-ALL #:BASH #:CD #:SET-STATUS #:STATUS-THINKING #:STATUS-OK #:print-model-ids #:model-id
-		   #:GET-PROMPT #:EP #:RP #:P #:ENP #:NP #:R #:HELP #:REMEMBER-AGENT #:RECALL-AGENT #:USE-RECORDED-AGENT #:RECORDED-AGENT-NAME)
+		   #:GET-PROMPT #:EP #:RP #:P #:ENP #:NP #:R #:HELP #:REMEMBER-AGENT #:RECALL-AGENT #:USE-RECORDED-AGENT #:RECORDED-AGENT-NAME #:TIMINGS)
   (:nicknames :c :co))
 
 (in-package :common)
@@ -22,6 +22,10 @@
 (defmacro defalias (alias original)
   "Make ALIAS share ORIGINAL's function object, so calling ALIAS doesn't add an extra funcall."
   `(setf (fdefinition ',alias) (fdefinition ',original)))
+
+;; TIMINGS is a shortcut for REPORT-TIMINGS, the same way EP/RP/NP
+;; shorten the prompt commands.
+(defalias timings report-timings)
 
 (defun print-sep ()
   (format t "~&~a~%" SEP))
@@ -133,6 +137,7 @@ says which agent it came up on. Returns the package now current."
      ("forget" . "wipe this agent's conversation memory")
      ("usage"   . "report this account's usage: cost, balance or tokens"))
     ("Timing"
+     ("timings"        . "shortcut for report-timings")
      ("report-timings" . "how long each agent type's last run took: wall and cpu")
      ("reset-timings"  . "discard the recorded run timings"))
     ("Shell"
