@@ -231,6 +231,6 @@ count of agent types reported."
   (let ((types (sort (hash-table-keys *timings*) #'string<)))
     (if types
         (progn
-          (dolist (type types) (format t "~&~a~%" (sample-line type)))
+          (dolist (type types) (format t "~&Times: ~a~%" (sample-line type)))
           (length types))
         (progn (format t "~&No timings recorded.~%") 0))))
