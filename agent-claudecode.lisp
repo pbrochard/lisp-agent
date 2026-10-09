@@ -1086,11 +1086,10 @@ rate-limit payload of its own, hence *LAST-RATE-LIMIT*."
                               (obj "role" "assistant" "content" (strip-terminal-control-chars text)))))
       (let ((context-usage (fetch-context-usage)))
         (sb-thread:with-mutex (*output-lock*)
-          (format t "~&~%~a~%~a ~a:~a~@[  ~a~]~%"
-                  (grey (format-usage cost rate-limit usage context-usage))
-                  SEP (grey (recorded-agent-name))
-                  (grey *model*)
-                  (grey (format-timing (recorded-agent-name))))))
+          (format t "~&~%~a~%" (grey (format-usage cost rate-limit usage context-usage)))
+          (let ((timing (format-timing (recorded-agent-name))))
+            (when timing (format t "~&~a~%" (grey timing))))
+          (format t "~&~a ~a:~a~%" SEP (grey (recorded-agent-name)) (grey *model*))))
       (set-status STATUS-OK))))
 
 (defun use ()
