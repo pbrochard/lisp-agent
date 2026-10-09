@@ -132,6 +132,9 @@ says which agent it came up on. Returns the package now current."
      ("use"    . "make this agent the current one and report its model")
      ("forget" . "wipe this agent's conversation memory")
      ("usage"   . "report this account's usage: cost, balance or tokens"))
+    ("Timing"
+     ("report-timings" . "how long each agent type's last run took: wall and cpu")
+     ("reset-timings"  . "discard the recorded run timings"))
     ("Shell"
      ("bash" . "drop into a bash shell")
      ("cd"   . "change directory: (cd \"/tmp\")")))
