@@ -225,12 +225,35 @@ min/max, and mean cpu."
                 (format-duration (apply #'max walls))
                 (format-duration (funcall mean runs)))))))
 
-(defun report-timings ()
+(defun report-timings (&key (prefix "Times: "))
   "Print one summary line per agent type that has been timed; return the
-count of agent types reported."
+count of agent types reported. PREFIX goes before each line -- the
+manual call keeps its default, while the exit hook passes \"\" and
+frames the block with a header of its own instead."
   (let ((types (sort (hash-table-keys *timings*) #'string<)))
     (if types
         (progn
-          (dolist (type types) (format t "~&Times: ~a~%" (sample-line type)))
+          (dolist (type types) (format t "~&~a~a~%" prefix (sample-line type)))
           (length types))
         (progn (format t "~&No timings recorded.~%") 0))))
+
+;;; --- timings at exit --------------------------------------------------------
+;;; The timing table lives only in memory, so it is gone the moment the image
+;;; exits. Print the summary once, on the way out, when anything was recorded
+;;; -- otherwise every bare REPL exit would print an empty report. SBCL runs
+;;; *EXIT-HOOKS* from EXIT, so this fires for (quit), (sb-ext:exit) and a plain
+;;; end-of-input alike; a SIGKILL (docker rm -f) is the one case it cannot
+;;; cover, and nothing can.
+
+(defun report-timings-at-exit ()
+  "Print the timing summary on the way out, but only when something was
+recorded: a session that timed nothing exits quietly. Failures are swallowed,
+since a reporting problem must never keep SBCL from exiting."
+  (ignore-errors
+    (unless (zerop (hash-table-count *timings*))
+      (format t "~&~a~%Times:~%"
+              "___________________________________________________________________________")
+      (report-timings :prefix "")
+      (finish-output))))
+
+(pushnew #'report-timings-at-exit sb-ext:*exit-hooks*)
