@@ -1066,7 +1066,8 @@ rate-limit payload of its own, hence *LAST-RATE-LIMIT*."
   (format t "~&______~&~%")
   (multiple-value-bind (on-event flush-remaining-output) (make-stream-printer)
     (multiple-value-bind (text session-id cost rate-limit usage)
-        (call-claude prompt on-event)
+        (with-timing ((recorded-agent-name))
+            (call-claude prompt on-event))
       (funcall flush-remaining-output)
       (unless session-id
         ;; The CLI answered without a session id: it failed before the model
@@ -1085,10 +1086,11 @@ rate-limit payload of its own, hence *LAST-RATE-LIMIT*."
                               (obj "role" "assistant" "content" (strip-terminal-control-chars text)))))
       (let ((context-usage (fetch-context-usage)))
         (sb-thread:with-mutex (*output-lock*)
-          (format t "~&~%~a~%~a ~a:~a~%"
+          (format t "~&~%~a~%~a ~a:~a~@[  ~a~]~%"
                   (grey (format-usage cost rate-limit usage context-usage))
                   SEP (grey (recorded-agent-name))
-                  (grey *model*))))
+                  (grey *model*)
+                  (grey (format-timing (recorded-agent-name))))))
       (set-status STATUS-OK))))
 
 (defun use ()

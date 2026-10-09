@@ -1,6 +1,7 @@
 (defpackage :utils
-  (:use :cl :cl-ansi-text)
-  (:export #:grey #:obj #:hash-table-keys #:hash-table-values #:obj-to-string #:lisp-eval #:run-lisp-eval-tool #:lisp-eval-tool-name #:lisp-eval-tool-description #:lisp-eval-tool-parameters #:replace-all #:ref #:remove-prefix #:round-to-1-decimal #:format-count))
+  (:use :cl :cl-ansi-text :sb-thread)
+  (:export #:grey #:obj #:hash-table-keys #:hash-table-values #:obj-to-string #:lisp-eval #:run-lisp-eval-tool #:lisp-eval-tool-name #:lisp-eval-tool-description #:lisp-eval-tool-parameters #:replace-all #:ref #:remove-prefix #:round-to-1-decimal #:format-count
+           #:with-timing #:format-timing #:reset-timings #:report-timings))
 
 (in-package :utils)
 
@@ -138,3 +139,98 @@ counts in its /context report."
               (string (gethash key acc))
               (integer (aref acc key))))
           keys :initial-value table))
+;;; --- timing ----------------------------------------------------------------
+;;; Measure how long each agent's model work takes, per invocation, so the
+;;; cost of a RUN can be compared across agent types. The agent type is passed
+;;; in by the caller (each agent's RUN knows its own RECORDED-AGENT-NAME);
+;;; utils loads before any agent, so it must not depend on common.
+;;;
+;;; Two clocks are kept, per invocation:
+;;;   :wall  get-internal-real-time  -- everything, including waiting on the
+;;;                                     network, which is most of a turn
+;;;   :run   get-internal-run-time   -- CPU only, GC and blocking excluded
+;;; Invocations are recorded rather than aggregated in place: a sum cannot be
+;;; un-summed back into a distribution, and the raw samples are cheap.
+
+(defparameter *timings* (make-hash-table :test #'equal)
+  "Agent type (a string) -> a list of invocations, newest first, each
+(:wall UNITS :run UNITS).")
+
+(defparameter *timings-lock* (make-mutex :name "utils-timings")
+  "Serializes pushes into *TIMINGS*: agent-claudecode's RUN can be reached
+from more than one thread, so there is no single-threaded assumption here.")
+
+(defun record-timing (agent-type wall run)
+  "Add one invocation of AGENT-TYPE, both times in internal time units."
+  (with-mutex (*timings-lock*)
+    (push (list :wall wall :run run)
+          (gethash agent-type *timings*))))
+
+(defun reset-timings ()
+  "Discard every recorded invocation."
+  (with-mutex (*timings-lock*)
+    (clrhash *timings*)))
+
+(defun seconds (units)
+  "Internal time UNITS as seconds, a float."
+  (/ units (float internal-time-units-per-second 1.0)))
+
+(defun format-duration (seconds)
+  "SECONDS as a short readable string: a whole-second count above one
+second, milliseconds below it, so a fast call does not read as 0.46s and a
+slow one does not read as 8321ms."
+  (if (>= seconds 1.0)
+      (format nil "~,2fs" seconds)
+      (format nil "~dms" (round (* seconds 1000)))))
+
+(defmacro with-timing ((agent-type) &body body)
+  "Run BODY as one invocation of AGENT-TYPE (a string), timing it with both
+clocks, and return BODY's value unchanged."
+  (let ((type (gensym "TYPE")) (t0 (gensym "T0")) (r0 (gensym "R0")))
+    `(let ((,type ,agent-type)
+           (,t0 (get-internal-real-time))
+           (,r0 (get-internal-run-time)))
+       (multiple-value-prog1
+           (progn ,@body)
+         (record-timing ,type
+                        (- (get-internal-real-time) ,t0)
+                        (- (get-internal-run-time) ,r0))))))
+
+(defun format-timing (agent-type)
+  "The last invocation of AGENT-TYPE as one line -- wall then cpu time -- or
+NIL when it has never been timed. What a RUN prints on its closing line."
+  (let ((samples (gethash agent-type *timings*)))
+    (when samples
+      (let* ((latest (first samples))
+             (wall (seconds (getf latest :wall)))
+             (run (seconds (getf latest :run))))
+        (format nil "~a wall, ~a cpu"
+                (format-duration wall) (format-duration run))))))
+
+(defun sample-line (agent-type)
+  "A compact summary of AGENT-TYPE's invocations: count, wall total/mean/
+min/max, and mean cpu."
+  (let* ((samples (gethash agent-type *timings*))
+         (n (length samples)))
+    (when (plusp n)
+      (let* ((walls (mapcar (lambda (s) (seconds (getf s :wall))) samples))
+             (runs  (mapcar (lambda (s) (seconds (getf s :run))) samples))
+             (sum (lambda (xs) (reduce #'+ xs)))
+             (mean (lambda (xs) (/ (funcall sum xs) n))))
+        (format nil "~a: ~d run~:p, wall ~a total, ~a mean, ~a min, ~a max | cpu ~a mean"
+                agent-type n
+                (format-duration (funcall sum walls))
+                (format-duration (funcall mean walls))
+                (format-duration (apply #'min walls))
+                (format-duration (apply #'max walls))
+                (format-duration (funcall mean runs)))))))
+
+(defun report-timings ()
+  "Print one summary line per agent type that has been timed; return the
+count of agent types reported."
+  (let ((types (sort (hash-table-keys *timings*) #'string<)))
+    (if types
+        (progn
+          (dolist (type types) (format t "~&~a~%" (sample-line type)))
+          (length types))
+        (progn (format t "~&No timings recorded.~%") 0))))

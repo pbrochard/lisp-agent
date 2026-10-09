@@ -146,18 +146,21 @@ balance to add the way the OpenAI-compatible agents do. DATE is accepted so
         (format t "~&No model call yet in this session.~%"))
     (format t "~&~a~%" (grey "No account usage over the API without an admin key."))))
 
+
 (defun run (prompt)
   (use)
-  (set-status STATUS-THINKING)
-  (let ((history (remember
-                  (agent-loop
-                   (append (recall)
-                           (list (obj "role" "user" "content" prompt)))))))
+  (set-status status-thinking)
+  (let ((history
+         (with-timing ((recorded-agent-name))
+          (remember
+           (agent-loop
+            (append (recall) (list (obj "role" "user" "content" prompt))))))))
     (format t "~&______~&~%~a~%" (final-text (car (last history))))
     (let ((tokens (format-claude-tokens *last-usage*)))
       (when tokens (format t "~&~a~%" (grey tokens))))
-    (format t "~&~a ~a:~a~%" SEP (grey (recorded-agent-name)) (grey *model*))
-	(set-status STATUS-OK)))
+    (format t "~&~a ~a:~a~@[  ~a~]~%" sep (grey (recorded-agent-name))
+            (grey *model*) (grey (format-timing (recorded-agent-name))))
+    (set-status status-ok)))
 
 (defun use ()
   (setf *current-run-fn* #'run

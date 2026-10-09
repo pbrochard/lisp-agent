@@ -75,18 +75,21 @@ what a turn cost. NIL until a call is made.")
 
 (defun use () nil)
 
+
 (defun run (prompt)
   (use)
-  (set-status STATUS-THINKING)
-  (let ((history (remember
-                  (agent-loop
-                   (append (recall)
-                           (list (obj "role" "user" "content" prompt)))))))
+  (set-status status-thinking)
+  (let ((history
+         (with-timing ((recorded-agent-name))
+          (remember
+           (agent-loop
+            (append (recall) (list (obj "role" "user" "content" prompt))))))))
     (format t "~&______~&~%~a~%" (gethash "content" (car (last history))))
     (let ((tokens (openai-utils:format-usage-tokens *last-usage*)))
       (when tokens (format t "~&~a~%" (grey tokens))))
-    (format t "~&~a ~a:~a~%" SEP (grey (recorded-agent-name)) (grey *model*))
-	(set-status STATUS-OK)))
+    (format t "~&~a ~a:~a~@[  ~a~]~%" sep (grey (recorded-agent-name))
+            (grey *model*) (grey (format-timing (recorded-agent-name))))
+    (set-status status-ok)))
 
 (defun use ()
   (setf *current-run-fn* #'run
