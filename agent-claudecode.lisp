@@ -874,6 +874,28 @@ what break a reply into deltas we can render as they arrive."
           (when *effort* (list "--effort" *effort*))
           (when session-id (list "--resume" session-id))))
 
+(defun answer-texts (event)
+  "The non-empty text blocks of a top-level assistant EVENT, NIL for any other
+event. Subagent text forwarded into the stream is not part of the answer."
+  (and (equal (gethash "type" event) "assistant")
+       (not (forwarded-subagent-id event))
+       (loop for block across (message-blocks event)
+             for text = (and (equal (gethash "type" block) "text")
+                             (gethash "text" block))
+             when (and (stringp text) (plusp (length text)))
+               collect text)))
+
+(defun answer-text (answer-parts result)
+  "The whole reply: every text block the turn wrote, one paragraph each. The
+CLI's own result text cannot stand in for it -- it holds only the last text
+block, dropping everything written before the last tool call, and a turn
+woken again by a background task ends in a second result that replaces the
+first. RESULT's text is only the fallback for a turn that wrote no text
+block: an error, or a slash command the CLI answered locally."
+  (if answer-parts
+      (format nil "~{~a~^~%~%~}" answer-parts)
+      (and result (gethash "result" result))))
+
 (defun call-claude (prompt on-event)
   "Run the claude CLI on PROMPT, calling ON-EVENT with each parsed JSON event
 as it arrives, so the caller can render the turn while it is still working.
@@ -886,6 +908,7 @@ context-usage)."
                                        :external-format '(:utf-8 :replacement #\?)
                                        :wait nil :search t))
          (result nil)
+         (answer-parts '())
          (rate-limit nil)
          (context-usage nil))
     (sb-thread:make-thread (lambda () (drain-stderr process)) :name "claude-stderr")
@@ -896,6 +919,7 @@ context-usage)."
                  (let* ((event (shasht:read-json line))
                         (type (gethash "type" event)))
                    (funcall on-event event)
+                   (setf answer-parts (append answer-parts (answer-texts event)))
                    (cond
                      ((equal type "rate_limit_event")
                       (setf rate-limit (gethash "rate_limit_info" event)))
@@ -905,7 +929,7 @@ context-usage)."
                    (let ((cu (gethash "context_usage" event)))
                      (when cu (setf context-usage cu))))))
     (sb-ext:process-wait process)
-    (values (gethash "result" result)
+    (values (answer-text answer-parts result)
             (gethash "session_id" result)
             (gethash "total_cost_usd" result)
             rate-limit
