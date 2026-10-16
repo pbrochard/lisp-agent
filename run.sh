@@ -56,7 +56,13 @@ docker run -d --name keyproxy \
 	   --name keyproxy \
 	   keyproxy:latest > /dev/null
 
-cleanup() { docker rm -f keyproxy > /dev/null 2>&1; }
+cleanup() {
+	docker rm -f keyproxy > /dev/null 2>&1;
+
+	DATE=$(date +%FT%T)
+	echo "Moving data to data-history/data-$DATE"
+	mv data data-history/data-$DATE
+}
 trap cleanup EXIT
 
 # nginx binds its listening port synchronously during startup, before the
