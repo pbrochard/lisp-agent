@@ -1,7 +1,7 @@
 (defpackage :common
   (:use :cl :utils :cl-ansi-text :uiop)
   (:export #:SYSTEM-PROMPT #:*CURRENT-RUN-FN* #:*current-model* #:*MEMORY-FILE* #:*SYSTEM-MESSAGE* #:SEP #:PRINT-SEP #:RECALL
-		   #:REMEMBER #:FORGET-MEM #:FORGET-ALL #:BASH #:CD #:SET-STATUS #:STATUS-THINKING #:STATUS-OK #:print-model-ids #:model-id
+		   #:REMEMBER #:FORGET-MEM #:FORGET-ALL #:BASH #:CD #:LS #:SET-STATUS #:STATUS-THINKING #:STATUS-OK #:print-model-ids #:model-id
 		   #:GET-PROMPT #:EP #:RP #:P #:ENP #:NP #:R #:HELP #:REMEMBER-AGENT #:RECALL-AGENT #:USE-RECORDED-AGENT #:RECORDED-AGENT-NAME #:TIMINGS)
   (:nicknames :c :co))
 
@@ -142,7 +142,8 @@ says which agent it came up on. Returns the package now current."
      ("reset-timings"  . "discard the recorded run timings"))
     ("Shell"
      ("bash" . "drop into a bash shell")
-     ("cd"   . "change directory: (cd \"/tmp\")")))
+     ("cd"   . "change directory: (cd \"/tmp\")")
+	 ("ls"   . "list directory")))
   "REPL commands shared by every agent, grouped by what they are for.
 Each entry is (COMMAND . DESCRIPTION); COMMAND is the short name to type.")
 
@@ -269,6 +270,10 @@ agent-claudecode's own session file alongside its memory."
 (defun cd (&optional path)
   (when path
 	(chdir path))
+  (getcwd))
+
+(defun ls ()
+  (sb-ext:run-program "/bin/ls" '("-p") :output t :input nil :search nil)
   (getcwd))
 
 ;;; Generic run
