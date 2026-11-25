@@ -357,7 +357,6 @@ SET-STATUS."
 ;; Run prompt
 (defun run-prompt ()
   (let ((prompt (get-prompt)))
-	(print-prompt prompt)
 	(run-unless-cancelled prompt)))
 
 (defalias rp run-prompt)
