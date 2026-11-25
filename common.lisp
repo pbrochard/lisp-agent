@@ -30,6 +30,9 @@
 (defun print-sep ()
   (format t "~&~a~%" SEP))
 
+(defun print-prompt (prompt)
+  (format t "~a~%" (yellow prompt)))
+
 ;;; --- memory ---------------------------------------------------------------
 ;;; Messages are already a list of hash tables, i.e. already JSON.
 ;;; So memory is nothing more than writing that list down and reading it back.
@@ -278,6 +281,7 @@ agent-claudecode's own session file alongside its memory."
 
 ;;; Generic run
 (defun run (prompt)
+  (print-prompt prompt)
   (funcall *current-run-fn* prompt))
 
 (defun memo ()
@@ -324,9 +328,6 @@ SET-STATUS."
 			  while line
 			  do (setf prompt (format nil "~a~&~a" prompt line)))))
 	prompt))
-
-(defun print-prompt (prompt)
-  (format t "~a~%" (yellow prompt)))
 
 (defconstant CANCEL-MARKER "!no!")
 
