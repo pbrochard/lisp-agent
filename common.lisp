@@ -341,8 +341,7 @@ SET-STATUS."
 
 ;; Edit prompt
 (defun edit-prompt ()
-  (sb-ext:run-program *editor* `(,PROMP_PATH) :output t :input t :search t)
-  (print-prompt (get-prompt)))
+  (sb-ext:run-program *editor* `(,PROMP_PATH) :output t :input t :search t))
 
 (defalias ep edit-prompt)
 
